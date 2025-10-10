@@ -3,6 +3,8 @@
 
 #include <round.h>
 #include <stdint.h>
+#include "lib/kernel/list.h"
+#include "threads/synch.h"
 
 /* Number of timer interrupts per second. */
 #define TIMER_FREQ 100
@@ -25,5 +27,14 @@ void timer_udelay (int64_t microseconds);
 void timer_ndelay (int64_t nanoseconds);
 
 void timer_print_stats (void);
+
+/*Associates thread (through semaphore) with its wake 
+  up time. Compatible with existing linked-list structure.*/
+struct sleeping_thread
+{
+  struct list_elem elem;  /* List element (for linked list) */
+  int64_t ticks;          /* System ticks when thread may wake up */
+  struct semaphore sema;  /* Semaphore for thread */
+};
 
 #endif /* devices/timer.h */
