@@ -71,6 +71,20 @@ static tid_t allocate_tid (void);
 static bool is_user_mode (struct thread *);
 #endif
 
+/* Comparision function for ordering 'thread' elements by priority. */
+static bool
+compare_thread_by_priority (const struct list_elem *a, 
+                          const struct list_elem *b, 
+                          void *aux UNUSED)
+{
+  const struct thread *thread_a =
+    list_entry(a, struct thread, elem);
+  const struct thread *thread_b =
+    list_entry(b, struct thread, elem);
+
+  return thread_a->priority < thread_b->priority;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
