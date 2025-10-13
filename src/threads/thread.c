@@ -270,8 +270,10 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, compare_thread_by_priority , NULL);
   t->status = THREAD_READY;
+  /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
+  intr_yield_on_return();
   intr_set_level (old_level);
 }
 
