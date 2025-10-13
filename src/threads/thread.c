@@ -366,11 +366,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 { 
-  /* Function of lock: We use a lock here to ensure the list_entry is atomic.
-     Since the current thread is the highest priority thread until the list
-     has been changed, it is safe to use lock. The following check to yield
-     ensures that the highest priority thread is scheduled once the function
-     returns*/
+  /* Check if priority is valid (PRI_MIN <= new priority <= PRI_MAX). */
+  ASSERT (new_priority >= PRI_MIN && new_priorty <= PRI_MAX);
+
   enum intr_level old_level = intr_disable();
   struct thread *cur = thread_current();
   cur -> priority = new_priority;
