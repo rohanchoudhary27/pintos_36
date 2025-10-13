@@ -72,7 +72,7 @@ static bool is_user_mode (struct thread *);
 #endif
 
 /* Comparision function for ordering 'thread' elements by priority. */
-static bool
+bool
 compare_thread_by_priority (const struct list_elem *a, 
                           const struct list_elem *b, 
                           void *aux UNUSED)
@@ -82,7 +82,7 @@ compare_thread_by_priority (const struct list_elem *a,
   const struct thread *thread_b =
     list_entry(b, struct thread, elem);
 
-  return thread_a->priority < thread_b->priority;
+  return thread_a->priority > thread_b->priority;
 }
 
 /* Initializes the threading system by transforming the code
