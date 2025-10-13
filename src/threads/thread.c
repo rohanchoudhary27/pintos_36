@@ -363,18 +363,22 @@ thread_foreach (thread_action_func *func, void *aux)
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) 
-{
+{ 
+  /* Function of lock: We use a lock here to ensure the list_entry is atomic.
+     Since the current thread is the highest priority thread until the list
+     has been changed, it is safe to use lock. The following check to yield
+     ensures that the highest priority thread is scheduled once the function
+     returns*/
+  enum intr_level old_level = intr_disable();
   struct thread *cur = thread_current();
   cur -> priority = new_priority;
-
-  /* PROTECT BY SEMAS */
-  if(!list_empty(&ready_list)) {
-    struct thread *highest = list_entry(list_front(&ready_list), struct thread, elem);
-    if(highest->priority > cur->priority) {
-      thread_yield();
+  struct thread *highest = list_entry(list_front(&ready_list), struct thread, elem);
+    if(!list_empty(&ready_list)) {
+      if(highest->priority > cur->priority) {
+        intr_yield_on_return();
+      }
     }
-  }
-  /* PROTECT BY SEMAS */
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
