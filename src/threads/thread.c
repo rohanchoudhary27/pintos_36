@@ -375,7 +375,12 @@ thread_set_priority (int new_priority)
   struct thread *highest = list_entry(list_front(&ready_list), struct thread, elem);
     if(!list_empty(&ready_list)) {
       if(highest->priority > cur->priority) {
-        intr_yield_on_return();
+        if(intr_context) {
+          intr_yield_on_return();
+        }
+        else {
+          thread_yield();
+        }
       }
     }
   intr_set_level(old_level);
