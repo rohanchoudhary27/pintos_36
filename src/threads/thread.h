@@ -91,7 +91,9 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
+    int priority;                       /* Base priority. */
+    int eff_priority;                   /* Effeective priority, with donations included. */  
+    struct lock *waiting_for;           /* Lock that the thread is blocked for, or NULL if not waiting. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */

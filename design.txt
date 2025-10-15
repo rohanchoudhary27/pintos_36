@@ -1,0 +1,6 @@
+Add `eff_priority` to `struct thread` so that priority donation becomes simple. When a higher priority thread `lock_acquire()`s, 
+it sets the `eff_priority` of the owner of the lock to its priority. Without any donations, it is the case that `eff_priority == priority`
+for any thread, where `priority` is its base priority. A donation is revoked when lock_release is called on a thread, and it that case it
+basically sets `eff_priority` to be its base priority.
+
+With this, scheduling needs to now take `eff_priority` into account on `ready_list`. 

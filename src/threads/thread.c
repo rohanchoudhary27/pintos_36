@@ -64,6 +64,7 @@ static struct thread *next_thread_to_run (void);
 static void thread_init (struct thread *, const char *name, int priority);
 static bool is_thread (struct thread *);
 static void *alloc_frame (struct thread *, size_t size);
+static int thread_get_priority_of(const struct thread *);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
@@ -81,8 +82,7 @@ compare_thread_by_priority (const struct list_elem *a,
     list_entry(a, struct thread, elem);
   const struct thread *thread_b =
     list_entry(b, struct thread, elem);
-
-  return thread_a->priority > thread_b->priority;
+  return thread_get_priority_of(thread_a) > thread_get_priority_of(thread_b);
 }
 
 /* Initializes the threading system by transforming the code
@@ -273,7 +273,7 @@ thread_unblock (struct thread *t)
   list_insert_ordered (&ready_list, &t->elem, compare_thread_by_priority , NULL);
   t->status = THREAD_READY;
   /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
-  intr_yield_on_return();
+  thread_yield ();
   intr_set_level (old_level);
 }
 
@@ -371,7 +371,7 @@ thread_set_priority (int new_priority)
 
   enum intr_level old_level = intr_disable();
   struct thread *cur = thread_current();
-  cur -> priority = new_priority;
+  cur->priority = new_priority;
   struct thread *highest = list_entry(list_front(&ready_list), struct thread, elem);
     if(!list_empty(&ready_list)) {
       if(highest->priority > cur->priority) {
@@ -381,11 +381,21 @@ thread_set_priority (int new_priority)
   intr_set_level(old_level);
 }
 
+static int 
+thread_get_priority_of(const struct thread *thread) {
+  /* When the thread is a donee, its effective priority increases. In that case, 
+      the effective priority should be returned. A thread is free of any donations
+      if its effective priority equals its base priority */
+  if (thread->eff_priority != thread->priority)
+    return thread->eff_priority;
+  return thread->priority;
+}
+
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  return thread_get_priority_of(thread_current ());
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -513,6 +523,8 @@ thread_init (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->eff_priority = priority;
+  t->waiting_for = NULL;
 #ifdef USERPROG
   t->process = NULL;
 #endif   

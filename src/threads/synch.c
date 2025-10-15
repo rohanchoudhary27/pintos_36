@@ -32,9 +32,6 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
-/* List to store threads and which lock they are waiting for. */
-static struct list thread_lock_waiting_list;
-
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -204,6 +201,13 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  struct thread *current_thread = thread_current ();
+  struct thread *lock_owner = lock->holder;
+  current_thread->waiting_for = lock;
+  if (lock_owner != NULL && lock_owner->priority < current_thread->priority) {
+    /* Donate current thread's priority to owner thread. */
+    lock_owner->eff_priority = current_thread->priority;
+  }
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }
@@ -239,7 +243,12 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  /* Revoke any donations. */
+  struct thread *current_thread = thread_current();
+  current_thread->eff_priority = current_thread->priority;
+
   lock->holder = NULL;
+  current_thread->waiting_for = NULL;
   sema_up (&lock->semaphore);
 }
 
