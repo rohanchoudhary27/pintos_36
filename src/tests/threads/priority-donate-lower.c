@@ -26,9 +26,10 @@ test_priority_donate_lower (void)
   lock_init (&lock);
   lock_acquire (&lock);
   thread_create ("acquire", PRI_DEFAULT + 10, acquire_thread_func, &lock);
+  // thread_get_priority lowers main's eff priority from 41 to 31 here
   msg ("Main thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 10, thread_get_priority ());
-
+  // before this main's effective priority is 31
   msg ("Lowering base priority...");
   thread_set_priority (PRI_DEFAULT - 10);
   msg ("Main thread should have priority %d.  Actual priority: %d.",

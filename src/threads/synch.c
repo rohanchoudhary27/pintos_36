@@ -204,9 +204,9 @@ lock_acquire (struct lock *lock)
   struct thread *current_thread = thread_current ();
   struct thread *lock_owner = lock->holder;
   current_thread->waiting_for = lock;
-  if (lock_owner != NULL && lock_owner->priority < current_thread->priority) {
+  if (lock_owner != NULL && lock_owner->eff_priority < current_thread->eff_priority) {
     /* Donate current thread's priority to owner thread. */
-    lock_owner->eff_priority = current_thread->priority;
+    lock_owner->eff_priority = current_thread->eff_priority;
   }
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();

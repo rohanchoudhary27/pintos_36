@@ -271,10 +271,16 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered (&ready_list, &t->elem, compare_thread_by_priority , NULL);
+  intr_set_level (old_level);
   t->status = THREAD_READY;
   /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
-  thread_yield ();
-  intr_set_level (old_level);
+  if (thread_current () != idle_thread && t->eff_priority > thread_get_priority ()) {
+    if (intr_context ()) {
+      intr_yield_on_return ();
+    } else {
+      thread_yield ();
+    }
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -369,21 +375,21 @@ thread_set_priority (int new_priority)
   /* Check if priority is valid (PRI_MIN <= new priority <= PRI_MAX). */
   ASSERT (new_priority >= PRI_MIN && new_priority <= PRI_MAX);
 
-  enum intr_level old_level = intr_disable();
-  struct thread *cur = thread_current();
+  enum intr_level old_level = intr_disable ();
+  struct thread *cur = thread_current ();
   cur->priority = new_priority;
-  struct thread *highest = list_entry(list_front(&ready_list), struct thread, elem);
-    if(!list_empty(&ready_list)) {
-      if(highest->priority > cur->priority) {
-        if(intr_context) {
-          intr_yield_on_return();
-        }
-        else {
-          thread_yield();
-        }
+  if(!list_empty (&ready_list)) {
+    struct thread *highest = list_entry (list_front (&ready_list), struct thread, elem);
+    if(highest->priority > cur->priority) {
+      if(intr_context ()) {
+        intr_yield_on_return ();
+      }
+      else {
+        thread_yield ();
       }
     }
-  intr_set_level(old_level);
+  }
+  intr_set_level (old_level);
 }
 
 static int 
