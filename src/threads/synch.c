@@ -252,13 +252,18 @@ lock_release (struct lock *lock)
   /* Revoke any donations. */
   struct thread *current_thread = thread_current();
   current_thread->eff_priority = current_thread->priority;
-
-  struct thread *first_elem = 
-        list_entry(list_front(&lock->semaphore.waiters), 
-                   struct thread, elem);
-  lock->holder = first_elem;
-  if (first_elem != NULL)
+  
+  if (list_empty(&lock->semaphore.waiters)) {
+    lock->holder= NULL;
+  }
+  else {
+    struct thread *first_elem = 
+          list_entry(list_front(&lock->semaphore.waiters), 
+                     struct thread, elem);
+                     
+    lock->holder = first_elem;
     first_elem->waiting_for = NULL;
+  }
   sema_up (&lock->semaphore);
 }
 
