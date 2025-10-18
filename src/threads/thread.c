@@ -378,10 +378,10 @@ thread_set_priority (int new_priority)
   enum intr_level old_level = intr_disable ();
   struct thread *cur = thread_current ();
   cur->priority = new_priority;
-  if(!list_empty (&ready_list)) {
+  if (!list_empty (&ready_list)) {
     struct thread *highest = list_entry (list_front (&ready_list), struct thread, elem);
-    if(highest->priority > cur->priority) {
-      if(intr_context ()) {
+    if (highest->priority > cur->priority) {
+      if (intr_context ()) {
         intr_yield_on_return ();
       }
       else {
@@ -394,12 +394,10 @@ thread_set_priority (int new_priority)
 
 static int 
 thread_get_priority_of(const struct thread *thread) {
-  /* When the thread is a donee, its effective priority increases. In that case, 
+  /* When the thread is a done, its effective priority increases. In that case, 
       the effective priority should be returned. A thread is free of any donations
       if its effective priority equals its base priority */
-  if (thread->eff_priority != thread->priority)
-    return thread->eff_priority;
-  return thread->priority;
+  return thread->eff_priority;
 }
 
 /* Returns the current thread's priority. */

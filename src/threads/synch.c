@@ -203,15 +203,17 @@ lock_acquire (struct lock *lock)
 
   struct thread *current_thread = thread_current ();
   struct thread *lock_owner = lock->holder;
-  if (lock_owner != NULL)
+  if (lock_owner != NULL) {
     current_thread->waiting_for = lock;
+  }
   while (lock_owner != NULL) {
-    if (lock_owner->eff_priority < current_thread->eff_priority) {
+    if (lock->holder->eff_priority < current_thread->eff_priority) {
       /* Donate current thread's priority to owner thread. */
-      lock_owner->eff_priority = current_thread->eff_priority;
+      lock->holder->eff_priority = current_thread->eff_priority;
     }
-    if (lock_owner->waiting_for != NULL)
-      lock_owner = lock_owner->waiting_for->holder;
+    if (lock->holder->waiting_for != NULL) {
+      lock_owner = lock->holder->waiting_for->holder;
+    }
   }
  
   sema_down (&lock->semaphore);
@@ -253,12 +255,11 @@ lock_release (struct lock *lock)
   struct thread *current_thread = thread_current();
   current_thread->eff_priority = current_thread->priority;
   
-  if (list_empty(&lock->semaphore.waiters)) {
+  if (list_empty (&lock->semaphore.waiters)) 
     lock->holder= NULL;
-  }
   else {
     struct thread *first_elem = 
-          list_entry(list_front(&lock->semaphore.waiters), 
+          list_entry (list_front (&lock->semaphore.waiters), 
                      struct thread, elem);
                      
     lock->holder = first_elem;
