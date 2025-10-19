@@ -532,8 +532,8 @@ thread_init (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  t->eff_priority = priority;
   t->waiting_for = NULL;
+  list_init (&t->donations);
 #ifdef USERPROG
   t->process = NULL;
 #endif   
