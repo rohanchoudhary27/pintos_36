@@ -69,6 +69,8 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0) 
     {
       /* Insert the current thread to waiters based on priority. */
+      if (!list_empty (&sema->waiters)) 
+        list_sort (&sema->waiters, compare_thread_by_priority, NULL);
       list_insert_ordered (&sema->waiters, &thread_current ()->elem, 
                            compare_thread_by_priority, NULL);
       thread_block ();
@@ -116,12 +118,14 @@ sema_up (struct semaphore *sema)
 
   old_level = intr_disable ();
   sema->value++;
-  if (!list_empty (&sema->waiters)) 
+  if (!list_empty (&sema->waiters)) { 
+    list_sort (&sema->waiters, compare_thread_by_priority, NULL);
     /* Unblocks the first thread from sema's waiters list. Since they are inserted
         in order, based on their priority, the thread we get from list_pop_front is
         the thread with the highest priority */
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
+  }
   intr_set_level (old_level);
 }
 
