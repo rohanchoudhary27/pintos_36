@@ -444,6 +444,38 @@ thread_calculate_effective_priority (struct thread *thread)
   return max_priority;
 }
 
+/* Adds priority donation from donor to donee. */
+void
+thread_donate_priority (struct thread *donee, struct thread *donor)
+{
+  ASSERT (donee != NULL);
+  ASSERT (donor != NULL);
+  
+  enum intr_level old_level = intr_disable ();
+  // thread_remove_donation (donee, donor)  TODO should we remove previous donations?
+  list_push_back (&donee->donations, &donor->donation_elem);
+  intr_set_level (old_level);
+}
+
+/* Removes priority donation from donor to donee. */
+void 
+thread_remove_donation (struct thread *donee, struct thread *donor) 
+{
+  ASSERT (donee != NULL);
+  ASSERT (donor != NULL);
+
+  struct list_elem *e;
+  for (e = list_begin (&donee->donations); e != list_end (&donee->donations);
+       e = list_next (e)) 
+  {
+    struct thread *current_donor = list_entry (e, struct thread, donation_elem);
+    if (current_donor == donor) {
+      list_remove (e);
+      break;
+    }
+  }
+}
+
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 

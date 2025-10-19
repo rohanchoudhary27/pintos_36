@@ -134,12 +134,15 @@ const char *thread_name (void);
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
 
-bool compare_thread_by_priority (const struct list_elem *a, 
-                          const struct list_elem *b, 
+bool compare_thread_by_priority (const struct list_elem *, 
+                          const struct list_elem *, 
                           void *aux UNUSED);
 
-void thread_update_effective_priority (struct thread *t);
-int thread_calculate_effective_priority (struct thread *t);
+void thread_donate_priority (struct thread *, struct thread *);
+void thread_remove_donation (struct thread *, struct thread *);                          
+
+void thread_update_effective_priority (struct thread *);
+int thread_calculate_effective_priority (struct thread *);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);

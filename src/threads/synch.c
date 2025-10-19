@@ -218,7 +218,7 @@ lock_acquire (struct lock *lock)
 
       if (don_priority > holder_priority) 
       {
-        // donate priority from donor to holder
+        thread_donate_priority (holder, donating_thread);
       }
       // move along the chain of donations (nested donation)
       if (holder->waiting_for != NULL) 
@@ -270,18 +270,21 @@ lock_release (struct lock *lock)
 
   /* Revoke any donations. */
   struct thread *current_thread = thread_current();
-  current_thread->eff_priority = current_thread->priority;
-  
-  if (list_empty (&lock->semaphore.waiters)) 
-    lock->holder= NULL;
-  else {
-    struct thread *first_elem = 
-          list_entry (list_front (&lock->semaphore.waiters), 
-                     struct thread, elem);
-                     
-    lock->holder = first_elem;
-    first_elem->waiting_for = NULL;
+
+  if (!list_empty (&lock->semaphore.waiters)) 
+  {
+    struct list_elem *e;
+     for (e = list_begin (&lock->semaphore.waiters); 
+         e != list_end (&lock->semaphore.waiters);
+         e = list_next (e))
+    {
+      /* Remove donations from threads that were waiting for this lock, one by one. */
+      struct thread *waiter = list_entry (e, struct thread, elem);
+      thread_remove_donation (current_thread, waiter);
+    }
   }
+  
+  lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
 
