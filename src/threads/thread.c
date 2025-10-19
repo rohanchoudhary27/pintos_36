@@ -402,9 +402,8 @@ thread_set_priority (int new_priority)
         }
       }
     }
-    intr_set_level (old_level);
   }
-
+  intr_set_level (old_level);
 }
 
 static int 
@@ -452,7 +451,7 @@ thread_donate_priority (struct thread *donee, struct thread *donor)
   ASSERT (donor != NULL);
   
   enum intr_level old_level = intr_disable ();
-  // thread_remove_donation (donee, donor)  TODO should we remove previous donations?
+  thread_remove_donation (donee, donor);  // should we remove previous donations?
   list_push_back (&donee->donations, &donor->donation_elem);
   intr_set_level (old_level);
 }
