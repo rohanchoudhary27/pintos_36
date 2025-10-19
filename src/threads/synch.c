@@ -202,22 +202,39 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   struct thread *current_thread = thread_current ();
-  struct thread *lock_owner = lock->holder;
-  if (lock_owner != NULL) {
+
+  /* If a thread does not own this lock, continue with downing the semaphore. */
+  if (lock->holder != NULL) 
+  {
     current_thread->waiting_for = lock;
-  }
-  while (lock_owner != NULL) {
-    if (lock->holder->eff_priority < current_thread->eff_priority) {
-      /* Donate current thread's priority to owner thread. */
-      lock->holder->eff_priority = current_thread->eff_priority;
+
+    struct thread* holder = lock->holder;
+    struct thread *donating_thread = current_thread;
+
+    while (holder != NULL && donating_thread != holder) 
+    {
+      int don_priority = thread_calculate_effective_priority (donating_thread);
+      int holder_priority = thread_calculate_effective_priority (holder);
+
+      if (don_priority > holder_priority) 
+      {
+        // donate priority from donor to holder
+      }
+      // move along the chain of donations (nested donation)
+      if (holder->waiting_for != NULL) 
+      {
+        donating_thread = holder;
+        holder = holder->waiting_for->holder;
+      } else 
+      {
+        break; // escape the chain
+      }
     }
-    if (lock->holder->waiting_for != NULL) {
-      lock_owner = lock->holder->waiting_for->holder;
-    }
   }
- 
+
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
+  current_thread->waiting_for = NULL; /* After blocking current thread doesn't wait for any lock. */
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
