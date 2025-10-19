@@ -274,7 +274,7 @@ thread_unblock (struct thread *t)
   intr_set_level (old_level);
   t->status = THREAD_READY;
   /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
-  if (thread_current () != idle_thread && t->eff_priority > thread_get_priority ()) {
+  if (thread_current () != idle_thread && thread_get_priority_of(t) > thread_get_priority ()) {
     if (intr_context ()) {
       intr_yield_on_return ();
     } else {
@@ -377,27 +377,71 @@ thread_set_priority (int new_priority)
 
   enum intr_level old_level = intr_disable ();
   struct thread *cur = thread_current ();
+  int old_eff_priority = thread_calculate_effective_priority (cur);
+
   cur->priority = new_priority;
-  if (!list_empty (&ready_list)) {
-    struct thread *highest = list_entry (list_front (&ready_list), struct thread, elem);
-    if (highest->priority > cur->priority) {
-      if (intr_context ()) {
-        intr_yield_on_return ();
-      }
-      else {
-        thread_yield ();
+  int new_eff_priority = thread_calculate_effective_priority (cur);
+
+  /* Only yield if effective priority decreases since the current 
+      running thread also has the highest priority, by priority 
+       scheduling, and if effective priority doesn't decrease continue running */
+  if (new_eff_priority < old_eff_priority)
+  {
+    if (!list_empty (&ready_list)) 
+    {
+      struct thread *highest = list_entry (list_front (&ready_list), struct thread, elem);
+      if (thread_get_priority_of (highest) > new_eff_priority) 
+      {
+        if (intr_context ()) 
+        {
+          intr_yield_on_return ();
+        }
+        else 
+        {
+          thread_yield ();
+        }
       }
     }
+    intr_set_level (old_level);
   }
-  intr_set_level (old_level);
+
 }
 
 static int 
-thread_get_priority_of(const struct thread *thread) {
-  /* When the thread is a done, its effective priority increases. In that case, 
-      the effective priority should be returned. A thread is free of any donations
-      if its effective priority equals its base priority */
-  return thread->eff_priority;
+thread_get_priority_of (const struct thread *thread) 
+{
+  return thread_calculate_effective_priority ((struct thread *) thread);
+}
+
+
+/* Calculates the effective priority of a thread based on its base priority
+    and any donations it has received. */
+int 
+thread_calculate_effective_priority (struct thread *thread)
+{
+  /* A thread's effective priority is the maximum of all its donated priorities. */
+  ASSERT (thread != NULL);
+
+  int max_priority = thread->priority;
+
+  if (!list_empty (&thread->donations)) 
+  {
+    struct list_elem *e;
+    for (e = list_begin (&thread->donations); e != list_end (&thread->donations);
+         e = list_next (e)) 
+    {
+      struct thread *donor = list_entry (e, struct thread, donation_elem);
+      /* Calculate donor's effective priority. Note that we are not using the priority
+          field of struct thread as in multiple donations, we need to compare with effective
+          priorities. */
+      int donor_priority = thread_calculate_effective_priority (donor);
+
+      if (donor_priority > max_priority) 
+        max_priority = donor_priority;
+    }
+  }
+
+  return max_priority;
 }
 
 /* Returns the current thread's priority. */

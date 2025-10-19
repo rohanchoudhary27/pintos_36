@@ -138,6 +138,9 @@ bool compare_thread_by_priority (const struct list_elem *a,
                           const struct list_elem *b, 
                           void *aux UNUSED);
 
+void thread_update_effective_priority (struct thread *t);
+int thread_calculate_effective_priority (struct thread *t);
+
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
