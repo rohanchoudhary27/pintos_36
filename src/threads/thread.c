@@ -64,6 +64,7 @@ static struct thread *next_thread_to_run (void);
 static void thread_init (struct thread *, const char *name, int priority);
 static bool is_thread (struct thread *);
 static void *alloc_frame (struct thread *, size_t size);
+static int thread_get_priority_of(const struct thread *);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
@@ -81,8 +82,7 @@ compare_thread_by_priority (const struct list_elem *a,
     list_entry(a, struct thread, elem);
   const struct thread *thread_b =
     list_entry(b, struct thread, elem);
-
-  return thread_a->priority > thread_b->priority;
+  return thread_get_priority_of(thread_a) > thread_get_priority_of(thread_b);
 }
 
 /* Initializes the threading system by transforming the code
@@ -271,10 +271,16 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered (&ready_list, &t->elem, compare_thread_by_priority , NULL);
+  intr_set_level (old_level);
   t->status = THREAD_READY;
   /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
-  intr_yield_on_return();
-  intr_set_level (old_level);
+  if (thread_current () != idle_thread && thread_get_priority_of(t) > thread_get_priority ()) {
+    if (intr_context ()) {
+      intr_yield_on_return ();
+    } else {
+      thread_yield ();
+    }
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -369,23 +375,127 @@ thread_set_priority (int new_priority)
   /* Check if priority is valid (PRI_MIN <= new priority <= PRI_MAX). */
   ASSERT (new_priority >= PRI_MIN && new_priority <= PRI_MAX);
 
-  enum intr_level old_level = intr_disable();
-  struct thread *cur = thread_current();
-  cur -> priority = new_priority;
-  struct thread *highest = list_entry(list_front(&ready_list), struct thread, elem);
-    if(!list_empty(&ready_list)) {
-      if(highest->priority > cur->priority) {
-        intr_yield_on_return();
+  enum intr_level old_level = intr_disable ();
+  struct thread *cur = thread_current ();
+  int old_eff_priority = thread_calculate_effective_priority (cur);
+
+  cur->priority = new_priority;
+
+  struct list_elem *e;
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) {
+    struct thread *t = list_entry (e, struct thread, allelem);
+
+    /* If thread t is waiting for a lock that we hold */
+    if (t->waiting_for != NULL && t->waiting_for->holder == cur) {
+      int waiter_priority = thread_calculate_effective_priority (t);
+      int current_priority = thread_calculate_effective_priority (cur);
+
+      if (waiter_priority > current_priority) {
+        thread_donate_priority (cur, t);
       }
     }
-  intr_set_level(old_level);
+  }
+
+  int new_eff_priority = thread_calculate_effective_priority (cur);
+
+  /* Only yield if effective priority decreases since the current 
+      running thread also has the highest priority, by priority 
+       scheduling, and if effective priority doesn't decrease continue running */
+  if (new_eff_priority < old_eff_priority && list_empty (&cur->donations))
+  {
+    if (!list_empty (&ready_list)) 
+    {
+      struct thread *highest = list_entry (list_front (&ready_list), struct thread, elem);
+      if (thread_get_priority_of (highest) > new_eff_priority) 
+      {
+        if (intr_context ()) 
+        {
+          intr_yield_on_return ();
+        }
+        else 
+        {
+          thread_yield ();
+        }
+      }
+    }
+  }
+  intr_set_level (old_level);
+}
+
+static int 
+thread_get_priority_of (const struct thread *thread) 
+{
+  return thread_calculate_effective_priority ((struct thread *) thread);
+}
+
+
+/* Calculates the effective priority of a thread based on its base priority
+    and any donations it has received. */
+int 
+thread_calculate_effective_priority (struct thread *thread)
+{
+  /* A thread's effective priority is the maximum of all its donated priorities. */
+  ASSERT (thread != NULL);
+
+  int max_priority = thread->priority;
+
+  if (!list_empty (&thread->donations)) 
+  {
+    struct list_elem *e;
+    for (e = list_begin (&thread->donations); e != list_end (&thread->donations);
+         e = list_next (e)) 
+    {
+      struct thread *donor = list_entry (e, struct thread, donation_elem);
+      /* Calculate donor's effective priority. Note that we are not using the priority
+          field of struct thread as in multiple donations, we need to compare with effective
+          priorities. */
+      int donor_priority = thread_calculate_effective_priority (donor);
+
+      if (donor_priority > max_priority) 
+        max_priority = donor_priority;
+    }
+  }
+
+  return max_priority;
+}
+
+/* Adds priority donation from donor to donee. */
+void
+thread_donate_priority (struct thread *donee, struct thread *donor)
+{
+  ASSERT (donee != NULL);
+  ASSERT (donor != NULL);
+  
+  enum intr_level old_level = intr_disable ();
+  thread_remove_donation (donee, donor);  // should we remove previous donations?
+  list_push_back (&donee->donations, &donor->donation_elem);
+  intr_set_level (old_level);
+}
+
+/* Removes priority donation from donor to donee. */
+void 
+thread_remove_donation (struct thread *donee, struct thread *donor) 
+{
+  ASSERT (donee != NULL);
+  ASSERT (donor != NULL);
+
+  struct list_elem *e;
+  for (e = list_begin (&donee->donations); e != list_end (&donee->donations);
+       e = list_next (e)) 
+  {
+    struct thread *current_donor = list_entry (e, struct thread, donation_elem);
+    if (current_donor == donor) {
+      list_remove (e);
+      break;
+    }
+  }
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  return thread_get_priority_of(thread_current ());
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -513,6 +623,8 @@ thread_init (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->waiting_for = NULL;
+  list_init (&t->donations);
 #ifdef USERPROG
   t->process = NULL;
 #endif   
