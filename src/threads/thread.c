@@ -380,12 +380,28 @@ thread_set_priority (int new_priority)
   int old_eff_priority = thread_calculate_effective_priority (cur);
 
   cur->priority = new_priority;
+
+  struct list_elem *e;
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) {
+    struct thread *t = list_entry (e, struct thread, allelem);
+
+    /* If thread t is waiting for a lock that we hold */
+    if (t->waiting_for != NULL && t->waiting_for->holder == cur) {
+      int waiter_priority = thread_calculate_effective_priority (t);
+      int current_priority = thread_calculate_effective_priority (cur);
+
+      if (waiter_priority > current_priority) {
+        thread_donate_priority (cur, t);
+      }
+    }
+  }
+
   int new_eff_priority = thread_calculate_effective_priority (cur);
 
   /* Only yield if effective priority decreases since the current 
       running thread also has the highest priority, by priority 
        scheduling, and if effective priority doesn't decrease continue running */
-  if (new_eff_priority < old_eff_priority)
+  if (new_eff_priority < old_eff_priority && list_empty (&cur->donations))
   {
     if (!list_empty (&ready_list)) 
     {
