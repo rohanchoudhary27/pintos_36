@@ -32,6 +32,10 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+static bool
+compare_sema_priority (const struct list_elem *, const struct list_elem *,
+                      void * UNUSED);
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -352,11 +356,43 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_insert_ordered (&cond->waiters, &waiter.elem, compare_thread_by_priority, NULL);
+  list_insert_ordered (&cond->waiters, &waiter.elem, compare_sema_priority, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
 }
+
+static bool
+compare_sema_priority (const struct list_elem *a,
+                      const struct list_elem *b,
+                      void *aux UNUSED)
+{
+  struct semaphore_elem *sema_a = list_entry (a, struct semaphore_elem, elem);
+  struct semaphore_elem *sema_b = list_entry (b, struct semaphore_elem, elem);
+
+  struct thread *thread_a = NULL;
+  struct thread *thread_b = NULL;
+
+  /* Get the highest priority thread waiting on each semaphore */
+  if (!list_empty (&sema_a->semaphore.waiters)) {
+    list_sort (&sema_a->semaphore.waiters, compare_thread_by_priority, NULL);
+    thread_a = list_entry (list_front (&sema_a->semaphore.waiters),
+                          struct thread, elem);
+  }
+  if (!list_empty (&sema_b->semaphore.waiters)) {
+    list_sort (&sema_b->semaphore.waiters, compare_thread_by_priority, NULL);
+    thread_b = list_entry (list_front (&sema_b->semaphore.waiters),
+                          struct thread, elem);
+  }
+
+  if (thread_a == NULL && thread_b == NULL) return false;
+  if (thread_a == NULL) return false;
+  if (thread_b == NULL) return true;
+
+  return thread_calculate_effective_priority (thread_a) >
+          thread_calculate_effective_priority (thread_b);
+}
+
 
 /* If any threads are waiting on COND (protected by LOCK), then
    this function signals one of them to wake up from its wait.
@@ -373,9 +409,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) 
-    sema_up (&list_entry (list_pop_front (&cond->waiters),
+  if (!list_empty (&cond->waiters)) {
+     list_sort (&cond->waiters, compare_sema_priority, NULL);
+     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);
+  }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
