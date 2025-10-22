@@ -17,6 +17,10 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+/* List of 64 total queues which contain threads depending on their
+   different priorities */
+static struct list ready_queue[PRI_MAX + 1];
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -107,11 +111,17 @@ threading_init (void)
   list_init (&ready_list);
   list_init (&all_list);
 
+  for (int i = 0; i <= PRI_MAX; i++) {
+    list_init(&ready_queue[i]);
+  }
+
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   thread_init (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  initial_thread->nice = NICE_DEFAULT;
+  initial_thread->recent_cpu = int_to_fixed(RECENT_CPU_DEFAULT);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -425,6 +435,10 @@ thread_set_priority (int new_priority)
 static int 
 thread_get_priority_of (const struct thread *thread) 
 {
+  if (thread_mlfqs) {
+    return thread->priority;
+  }
+
   return thread_calculate_effective_priority ((struct thread *) thread);
 }
 

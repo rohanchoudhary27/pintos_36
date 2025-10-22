@@ -1,6 +1,7 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "fixed-point-number.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -23,6 +24,14 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Thread niceness. */
+#define NICE_MIN -20                    /* Lowest niceness. */
+#define NICE_DEFAULT 0                  /* Default niceness. */
+#define NICE_MAX 20                     /* Highest niceness. */
+
+/* Thread recent_cpu. */
+#define RECENT_CPU_DEFAULT 0            /* Default recent_cpu. */
 
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -92,6 +101,8 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Base priority. */
+    int nice;                           /* Nice value of thread */
+    fixed_point_number recent_cpu;      /* Recent_cpu value of thread */
     struct lock *waiting_for;           /* Lock that the thread is blocked for, or NULL if not waiting. */
     struct list donations;              /* List of donations received by this thread. */
     struct list_elem donation_elem;     /* List element for being in another thread's donations list. */
