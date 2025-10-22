@@ -162,6 +162,10 @@ threading_init (void)
   initial_thread->tid = allocate_tid ();
   initial_thread->nice = NICE_DEFAULT;
   initial_thread->recent_cpu = int_to_fixed(RECENT_CPU_DEFAULT);
+
+  if (thread_mlfqs) {
+    initial_thread->priority = calculate_priority_adv(initial_thread->recent_cpu, initial_thread->nice);
+  }
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -194,6 +198,10 @@ threads_ready (void)
     for (int i = 0; i <= PRI_MAX; i++) {
       ready_thread_count += list_size (&ready_queue[i]);
     }
+    if (thread_current() != idle_thread)
+    {
+      ready_thread_count++;
+    }
   } else {
     ready_thread_count = list_size (&ready_list);
   }
@@ -208,6 +216,38 @@ void
 thread_tick (void) 
 {
   struct thread *t = thread_current ();
+
+  if (thread_mlfqs) {
+    // Increment recent_cpu for the current thread each tick
+
+    if (t != idle_thread) {
+      t->recent_cpu = sumfi(t->recent_cpu, 1);
+    }
+  }
+
+  // Do operations that need to be done every second
+  if (timer_ticks() % TIMER_FREQ == 0) {
+    
+    // Run only if advanced scheduler is being used
+    if (thread_mlfqs) {
+      // Update the load_avg every second
+      update_load_avg();
+
+      // Update the recent_cpu values of each thread every second
+      thread_update_all_recent_cpu();
+    }
+    
+  }
+
+  // Do operations that need to be done every fourth timer tick
+  if (timer_ticks() % 4 == 0) {
+
+    // Run only if advanced scheduler is being used
+    if (thread_mlfqs) {
+      thread_update_all_priority();
+    }
+   
+  }
 
   /* Update statistics. */
   if (t == idle_thread)
@@ -264,6 +304,15 @@ thread_create (const char *name, int priority,
   t = palloc_get_page (PAL_ZERO);
   if (t == NULL)
     return TID_ERROR;
+
+  
+  /* Do these operations at thread creation if advanced scheduler
+     is being used */
+  if (thread_mlfqs) {
+    t->nice = thread_current()->nice;
+    t->recent_cpu = thread_current()->recent_cpu;
+    priority = calculate_priority_adv(t->recent_cpu, t->nice);
+  }
 
   /* Initialize thread. */
   thread_init (t, name, priority);
@@ -331,6 +380,8 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   
+  t->status = THREAD_READY;
+
   if (thread_mlfqs) {
     list_push_back(&ready_queue[t->priority], &t->elem);
   } else {
@@ -338,7 +389,6 @@ thread_unblock (struct thread *t)
   }
 
   intr_set_level (old_level);
-  t->status = THREAD_READY;
   /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
 
 
@@ -597,6 +647,8 @@ void update_load_avg(void) {
 
 /* Updates the recent_cpu value for a single thread */
 void thread_update_recent_cpu(struct thread *t, void *aux UNUSED) {
+  if (t == idle_thread) return;
+
   t->recent_cpu = sumfi(multff(divff(multfi(load_avg, 2), sumfi(multfi(load_avg, 2), 1)), t->recent_cpu), t->nice);
 }
 
@@ -606,15 +658,32 @@ void thread_update_all_recent_cpu(void) {
 }
 
 void thread_update_priority(struct thread *t, void *aux UNUSED) {
+  if (t == idle_thread) return;
+
   t->priority = calculate_priority_adv(t->recent_cpu, t->nice);
-  list_remove(&t->elem);
-  list_push_back(&ready_queue[t->priority], &t->elem);
+
+  if (t->status == THREAD_READY) {
+    list_remove(&t->elem);
+    list_push_back(&ready_queue[t->priority], &t->elem);
+  }
 }
 
 void thread_update_all_priority(void) {
   thread_foreach(thread_update_priority, NULL);
 
-  thread_set_priority(thread_current()->priority);
+  if (!ready_queue_empty()) {
+    if (ready_queue_highest_priority() > thread_current()->priority) 
+    {
+      if (intr_context ()) 
+      {
+        intr_yield_on_return ();
+      }
+      else 
+      {
+        thread_yield ();
+      }
+    }
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -635,7 +704,22 @@ thread_set_nice (int nice UNUSED)
 
   int new_priority = calculate_priority_adv(thread_current()->recent_cpu, nice);
 
-  thread_set_priority(new_priority);
+  thread_current()->priority = new_priority;
+
+  if (!ready_queue_empty()) {
+    if (ready_queue_highest_priority() > thread_current()->priority) 
+    {
+      if (intr_context ()) 
+      {
+        intr_yield_on_return ();
+      }
+      else 
+      {
+        thread_yield ();
+      }
+    }
+  }
+  
 }
 
 /* Returns the current thread's nice value. */

@@ -226,35 +226,6 @@ timer_interrupt (struct intr_frame *args UNUSED)
     }
   intr_set_level (old_level);
 
-  // Do operations that need to be done every second
-  if (ticks % TIMER_FREQ == 0) {
-    
-    // Run only if advanced scheduler is being used
-    if (thread_mlfqs) {
-      // Update the load_avg every second
-      update_load_avg();
-
-      // Update the recent_cpu values of each thread every second
-      thread_update_all_recent_cpu();
-    }
-    
-  }
-
-  // Do operations that need to be done every fourth timer tick
-  if (ticks % 4 == 0) {
-
-    // Run only if advanced scheduler is being used
-    if (thread_mlfqs) {
-      thread_update_all_priority();
-    }
-   
-  }
-
-  if (thread_mlfqs) {
-    // Increment recent_cpu for the current thread each tick
-    thread_current()->recent_cpu = sumfi(thread_current()->recent_cpu, 1);
-  }
-
   thread_tick ();
 }
 

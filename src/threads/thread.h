@@ -2,6 +2,7 @@
 #define THREADS_THREAD_H
 
 #include "fixed-point-number.h"
+#include "devices/timer.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
