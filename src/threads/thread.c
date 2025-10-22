@@ -330,7 +330,13 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered (&ready_list, &t->elem, compare_thread_by_priority , NULL);
+  
+  if (thread_mlfqs) {
+    list_push_back(&ready_queue[t->priority], &t->elem);
+  } else {
+    list_insert_ordered (&ready_list, &t->elem, compare_thread_by_priority , NULL);
+  }
+
   intr_set_level (old_level);
   t->status = THREAD_READY;
   /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
@@ -406,8 +412,19 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_insert_ordered (&ready_list, &cur->elem, compare_thread_by_priority , NULL);
+  
+  if (cur != idle_thread) {
+    if (thread_mlfqs) {
+      /* It is important that we push back instead of push front 
+         because to hold a round-robin scheduling for the threads
+         with same priorities we have to take the head thread to
+         run and put the thread at the back when yielded */
+      list_push_back (&ready_queue[cur->priority], &cur->elem);
+    } else {
+      list_insert_ordered (&ready_list, &cur->elem, compare_thread_by_priority , NULL);
+    }
+  }
+
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -442,7 +459,7 @@ thread_set_priority (int new_priority)
 
   if (thread_mlfqs) {
     cur->priority = new_priority;
-    
+
     if (!ready_queue_empty()) {
       int highest_priority = ready_queue_highest_priority();
       if (highest_priority > cur->priority) {
