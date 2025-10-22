@@ -26,8 +26,8 @@ inline int32_t fixed_to_int(fixed_point_number a) {
 }
 
 inline int32_t fixed_to_int_truncate(fixed_point_number a) {
-    if (a.raw >= 0) return (a.raw) / FP_SCALE;
-    return -((-a.raw + FP_SCALE - 1) / FP_SCALE);
+    return (a.raw) / FP_SCALE;
+    //return -((-a.raw + FP_SCALE - 1) / FP_SCALE);
 }
 
 // Multiplication with int32_t
