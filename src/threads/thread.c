@@ -508,18 +508,7 @@ thread_set_priority (int new_priority)
   struct thread *cur = thread_current ();
 
   if (thread_mlfqs) {
-    cur->priority = new_priority;
-
-    if (!ready_queue_empty()) {
-      int highest_priority = ready_queue_highest_priority();
-      if (highest_priority > cur->priority) {
-        if (intr_context ()) {
-          intr_yield_on_return ();
-        } else {
-          thread_yield ();
-        }
-      }
-    }
+    return;
   } else {
     int old_eff_priority = thread_calculate_effective_priority (cur);
 
@@ -642,7 +631,11 @@ thread_remove_donation (struct thread *donee, struct thread *donor)
 
 /* Updates the load_avg value */
 void update_load_avg(void) {
-  load_avg = sumff(divfi(multfi(load_avg, 59), 60), divfi(int_to_fixed(threads_ready()), 60));
+  /* Add extra to threads_ready() if the current running
+     thread isn't the idle thread */
+  int extra = (thread_current() == idle_thread) ? 0 : 1;
+
+  load_avg = sumff(divfi(multfi(load_avg, 59), 60), divfi(int_to_fixed(threads_ready() + extra), 60));
 }
 
 /* Updates the recent_cpu value for a single thread */
