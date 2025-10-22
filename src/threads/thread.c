@@ -89,6 +89,42 @@ compare_thread_by_priority (const struct list_elem *a,
   return thread_get_priority_of(thread_a) > thread_get_priority_of(thread_b);
 }
 
+/* Returns true if ready_queue is empty false otherwise */
+static bool ready_queue_empty(void) {
+  for (int i = PRI_MAX; i >= 0; i--) {
+    if (!list_empty(&ready_queue[i])) {
+      return false; 
+    }
+  }
+
+  return true;
+}
+
+/* Returns the priority of the thread with the highest priority in
+   ready_queue. Returns -1 if there are no threads in ready_queue */
+static int ready_queue_highest_priority(void) {
+  ASSERT(!ready_queue_empty());
+
+  for (int i = PRI_MAX; i >= 0; i--) {
+    if (!list_empty(&ready_queue[i])) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+/* Helper function to calculate the priority by recent_cpu and nice score */
+static int calculate_priority_adv(fixed_point_number recent_cpu, int nice) {
+  int new_priority = PRI_MAX - fixed_to_int_truncate(divfi(recent_cpu, 4)) - (nice * 2);
+
+  if (PRI_MAX < new_priority) new_priority = PRI_MAX;
+  else if (PRI_MIN > new_priority) new_priority = PRI_MIN;
+
+  return new_priority;
+}
+
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -284,6 +320,8 @@ thread_unblock (struct thread *t)
   intr_set_level (old_level);
   t->status = THREAD_READY;
   /* Schedule again with the sleeping thread unblocked and inserted into correct position based on priority. */
+
+
   if (thread_current () != idle_thread && thread_get_priority_of(t) > thread_get_priority ()) {
     if (intr_context ()) {
       intr_yield_on_return ();
@@ -670,10 +708,19 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list))
-    return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  if (thread_mlfqs) {
+    if (ready_queue_empty()) {
+      return idle_thread;
+    } else {
+      int highest_priority = ready_queue_highest_priority();
+      return list_entry (list_pop_front (&ready_queue[highest_priority]), struct thread, elem);
+    }
+  } else {
+    if (list_empty (&ready_list))
+      return idle_thread;
+    else
+      return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
