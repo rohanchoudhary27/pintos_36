@@ -17,6 +17,8 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+fixed_point_number load_avg;
+
 /* List of 64 total queues which contain threads depending on their
    different priorities */
 static struct list ready_queue[PRI_MAX + 1];
@@ -151,6 +153,8 @@ threading_init (void)
     list_init(&ready_queue[i]);
   }
 
+  load_avg = int_to_fixed(0);
+
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   thread_init (initial_thread, "main", PRI_DEFAULT);
@@ -182,8 +186,18 @@ threading_start (void)
 size_t
 threads_ready (void)
 {
+  size_t ready_thread_count = 0;
+
   enum intr_level old_level = intr_disable ();
-  size_t ready_thread_count = list_size (&ready_list);
+  
+  if (thread_mlfqs) {
+    for (int i = 0; i <= PRI_MAX; i++) {
+      ready_thread_count += list_size (&ready_queue[i]);
+    }
+  } else {
+    ready_thread_count = list_size (&ready_list);
+  }
+  
   intr_set_level (old_level);
   return ready_thread_count;
 }
@@ -543,6 +557,33 @@ thread_remove_donation (struct thread *donee, struct thread *donor)
   }
 }
 
+/* Updates the load_avg value */
+void update_load_avg(void) {
+  load_avg = sumff(divfi(multfi(load_avg, 59), 60), divfi(int_to_fixed(threads_ready()), 60));
+}
+
+/* Updates the recent_cpu value for a single thread */
+void thread_update_recent_cpu(struct thread *t, void *aux UNUSED) {
+  t->recent_cpu = sumfi(multff(divff(multfi(load_avg, 2), sumfi(multfi(load_avg, 2), 1)), t->recent_cpu), t->nice);
+}
+
+/* Updates the recent_cpu value for every thread */
+void thread_update_all_recent_cpu(void) {
+  thread_foreach(thread_update_recent_cpu, NULL);
+}
+
+void thread_update_priority(struct thread *t, void *aux UNUSED) {
+  t->priority = calculate_priority_adv(t->recent_cpu, t->nice);
+  list_remove(&t->elem);
+  list_push_back(&ready_queue[t->priority], &t->elem);
+}
+
+void thread_update_all_priority(void) {
+  thread_foreach(thread_update_priority, NULL);
+
+  thread_set_priority(thread_current()->priority);
+}
+
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
@@ -554,31 +595,35 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  /* Check if niceness is valid (NICE_MIN <= new priority <= NICE_MAX). */
+  ASSERT(nice >= NICE_MIN && nice <= NICE_MAX);
+
+  thread_current()->nice = nice;
+
+  int new_priority = calculate_priority_adv(thread_current()->recent_cpu, nice);
+
+  thread_set_priority(new_priority);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fixed_to_int(multfi(load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fixed_to_int(multfi(thread_current()->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
