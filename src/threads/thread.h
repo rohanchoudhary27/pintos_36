@@ -104,9 +104,9 @@ struct thread
     int priority;                       /* Base priority. */
     int nice;                           /* Nice value of thread */
     fixed_point_number recent_cpu;      /* Recent_cpu value of thread */
-    struct lock *waiting_for;           /* Lock that the thread is blocked for, or NULL if not waiting. */
+    struct lock *waiting_for;           /* Lock that the thread is blocked for, or NULL if not. */
     struct list donations;              /* List of donations received by this thread. */
-    struct list_elem donation_elem;     /* List element for being in another thread's donations list. */
+    struct list_elem donation_elem;     /* List element for being in another's donation list. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
