@@ -163,9 +163,6 @@ threading_init (void)
   initial_thread->nice = NICE_DEFAULT;
   initial_thread->recent_cpu = int_to_fixed(RECENT_CPU_DEFAULT);
 
-  if (thread_mlfqs) {
-    initial_thread->priority = calculate_priority_adv(initial_thread->recent_cpu, initial_thread->nice);
-  }
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -197,10 +194,6 @@ threads_ready (void)
   if (thread_mlfqs) {
     for (int i = 0; i <= PRI_MAX; i++) {
       ready_thread_count += list_size (&ready_queue[i]);
-    }
-    if (thread_current() != idle_thread)
-    {
-      ready_thread_count++;
     }
   } else {
     ready_thread_count = list_size (&ready_list);
@@ -631,11 +624,15 @@ thread_remove_donation (struct thread *donee, struct thread *donor)
 
 /* Updates the load_avg value */
 void update_load_avg(void) {
-  /* Add extra to threads_ready() if the current running
-     thread isn't the idle thread */
-  int extra = (thread_current() == idle_thread) ? 0 : 1;
+  enum intr_level old_level = intr_disable();
+  int ready = threads_ready();
+  if (thread_current() != idle_thread)
+  {
+    ready++;
+  }
+  intr_set_level(old_level);
 
-  load_avg = sumff(divfi(multfi(load_avg, 59), 60), divfi(int_to_fixed(threads_ready() + extra), 60));
+  load_avg = sumff(divfi(multfi(load_avg, 59), 60), divfi(int_to_fixed(ready), 60));
 }
 
 /* Updates the recent_cpu value for a single thread */
@@ -653,12 +650,15 @@ void thread_update_all_recent_cpu(void) {
 void thread_update_priority(struct thread *t, void *aux UNUSED) {
   if (t == idle_thread) return;
 
+  int old = t->priority;
   t->priority = calculate_priority_adv(t->recent_cpu, t->nice);
 
-  if (t->status == THREAD_READY) {
+  enum intr_level old_level = intr_disable();
+  if (t->status == THREAD_READY && old != t->priority) {
     list_remove(&t->elem);
     list_push_back(&ready_queue[t->priority], &t->elem);
   }
+  intr_set_level(old_level);
 }
 
 void thread_update_all_priority(void) {
