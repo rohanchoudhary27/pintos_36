@@ -1,9 +1,7 @@
 #include "fixed-point-number.h"
 #include <stdint.h>
 
-
-/* ---------- HELPER FUNCTIONS ---------- */
-// Project from int64_t to int32_t
+/* Project from int64_t to int32_t */
 static inline int32_t 
 sat_i64_to_i32 (int64_t v) 
 {
@@ -12,9 +10,7 @@ sat_i64_to_i32 (int64_t v)
     return (int32_t)v;
 }
 
-
-/* ---------- REQUIRED FUNCTIONS ---------- */
-// Create fixed_point_number set at integer
+/* Create fixed_point_number set at integer */
 inline fixed_point_number 
 int_to_fixed (int a) 
 {
@@ -23,7 +19,7 @@ int_to_fixed (int a)
     return fixed_num;
 }
 
-// Convert fixed_point_number to integer
+/* Convert fixed_point_number to integer */
 inline int32_t 
 fixed_to_int (fixed_point_number a) 
 {
@@ -31,14 +27,14 @@ fixed_to_int (fixed_point_number a)
     return (a.raw - FP_SCALE / 2) / FP_SCALE;
 }
 
+/* Converts a fixed point number to a 32 bit integer by truncation */
 inline int32_t 
 fixed_to_int_truncate( fixed_point_number a) 
 {
     return (a.raw) / FP_SCALE;
-    //return -((-a.raw + FP_SCALE - 1) / FP_SCALE);
 }
 
-// Multiplication with int32_t
+/* Multiplication with int32_t */
 inline fixed_point_number
 multfi (fixed_point_number a, int32_t b) 
 {
@@ -47,7 +43,7 @@ multfi (fixed_point_number a, int32_t b)
     return r;
 }
 
-// Multiplication with another fixed_point_number
+/* Multiplication with another fixed_point_number */
 inline fixed_point_number 
 multff (fixed_point_number a, fixed_point_number b) 
 {
@@ -57,7 +53,7 @@ multff (fixed_point_number a, fixed_point_number b)
     return r;
 }
 
-// Division with int32_t
+/* Division with int32_t */
 inline fixed_point_number 
 divfi (fixed_point_number a, int32_t b) 
 {
@@ -73,7 +69,7 @@ divfi (fixed_point_number a, int32_t b)
     return r;
 }
 
-// Division with another fixed_point_number
+/* Division with another fixed_point_number */
 inline fixed_point_number 
 divff (fixed_point_number a, fixed_point_number b) 
 {
@@ -90,7 +86,7 @@ divff (fixed_point_number a, fixed_point_number b)
     return r;
 }
 
-// Summation with int
+/* Summation with int */
 inline fixed_point_number 
 sumfi (fixed_point_number a, int32_t b) 
 {
@@ -100,7 +96,7 @@ sumfi (fixed_point_number a, int32_t b)
     return r;
 }
 
-// Summation with another fixed_point_number
+/* Summation with another fixed_point_number */
 inline fixed_point_number 
 sumff (fixed_point_number a, fixed_point_number b) 
 {
@@ -109,7 +105,7 @@ sumff (fixed_point_number a, fixed_point_number b)
     return r;
 }
 
-// Subtraction with int
+/* Subtraction with int */
 inline fixed_point_number 
 subfi (fixed_point_number a, int32_t b) 
 {
@@ -119,7 +115,7 @@ subfi (fixed_point_number a, int32_t b)
     return r;
 }
 
-// Subtraction with another fixed_point_number
+/* Subtraction with another fixed_point_number */
 inline fixed_point_number 
 subff (fixed_point_number a, fixed_point_number b) 
 {
