@@ -28,7 +28,7 @@ void timer_ndelay (int64_t nanoseconds);
 
 void timer_print_stats (void);
 
-/*Associates thread (through semaphore) with its wake 
+/*Associates thread (through semaphore) with its wake
   up time. Compatible with existing linked-list structure.*/
 struct sleeping_thread
 {
