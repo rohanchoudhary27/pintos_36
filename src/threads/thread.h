@@ -146,12 +146,12 @@ const char *thread_name (void);
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
 
-bool compare_thread_by_priority (const struct list_elem *, 
-                          const struct list_elem *, 
-                          void *aux UNUSED);
+bool compare_thread_by_priority(const struct list_elem *,
+                                const struct list_elem *,
+                                void *aux UNUSED);
 
 void thread_donate_priority (struct thread *, struct thread *);
-void thread_remove_donation (struct thread *, struct thread *);                          
+void thread_remove_donation(struct thread *, struct thread *);
 
 void thread_update_effective_priority (struct thread *);
 int thread_calculate_effective_priority (struct thread *);

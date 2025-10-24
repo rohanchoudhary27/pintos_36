@@ -95,9 +95,9 @@ timer_elapsed (int64_t then)
 /* Comparision function for ordering 'sleeping_thread' elements by
    wake up time. */
 static bool
-compare_sleeping_threads (const struct list_elem *a, 
-                          const struct list_elem *b, 
-                          void *aux UNUSED)
+compare_sleeping_threads(const struct list_elem *a,
+                         const struct list_elem *b,
+                         void *aux UNUSED)
 {
   const struct sleeping_thread *sleeping_thread_a =
     list_entry(a, struct sleeping_thread, elem);
@@ -121,13 +121,13 @@ timer_sleep (int64_t ticks)
   struct sleeping_thread new_sleeping_thread;
   new_sleeping_thread.ticks = start + ticks;
   sema_init(&new_sleeping_thread.sema, 0); /* Sema taken at init*/
-  list_insert_ordered(&sleeping_threads, 
-                      &new_sleeping_thread.elem, 
-                      compare_sleeping_threads, 
+  list_insert_ordered(&sleeping_threads,
+                      &new_sleeping_thread.elem,
+                      compare_sleeping_threads,
                       NULL);
 
   sema_down(&new_sleeping_thread.sema);
-  intr_set_level (old_level); 
+  intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -210,16 +210,16 @@ timer_interrupt (struct intr_frame *args UNUSED)
   enum intr_level old_level = intr_disable ();
   while (!list_empty(&sleeping_threads))
     {
-      struct sleeping_thread *first_elem = 
-        list_entry(list_front(&sleeping_threads), 
-                   struct sleeping_thread, elem);
+      struct sleeping_thread *first_elem =
+          list_entry(list_front(&sleeping_threads),
+                     struct sleeping_thread, elem);
 
       if (first_elem->ticks <= ticks)
         {
           sema_up(&first_elem->sema);
           list_pop_front(&sleeping_threads);
         }
-      else 
+        else
         {
           break;
         }
