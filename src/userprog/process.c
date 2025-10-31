@@ -161,7 +161,7 @@ process_exit (int exit_code UNUSED)
         }
   
       /* Finally, destroy the current process's struct */
-        printf("%s: exit(%d)\n", thread_current()->name, exit_code);
+        printf("<%s>: exit(%d)\n", thread_current()->name, exit_code);
         thread_current()->process = NULL;
         free(cur);
     }
