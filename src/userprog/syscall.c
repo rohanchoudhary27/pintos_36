@@ -18,3 +18,15 @@ syscall_handler (struct intr_frame *f UNUSED)
   printf ("system call!\n");
   process_exit (PROC_ERR);
 }
+
+static int write(int fd, const void* buffer, unsigned size) {
+
+  if (buffer == NULL) {
+    return 0;
+  }
+  if (fd == 1) {
+    putbuf(buffer, size);
+    return size;
+  }
+  return 0;
+}
