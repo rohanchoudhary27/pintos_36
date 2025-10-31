@@ -3,7 +3,8 @@
       "synch.h": "c",
       "cstdlib": "c",
       "process.h": "c",
-      "syscall.h": "c"
+      "syscall.h": "c",
+      "interrupt.h": "c"
     },
     "C_Cpp.default.defines": [
 		"USERPROG"
