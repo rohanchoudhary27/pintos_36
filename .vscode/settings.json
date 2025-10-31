@@ -1,10 +1,15 @@
 {
     "files.associations": {
-        "synch.h": "c",
-        "cstdlib": "c"
+      "synch.h": "c",
+      "cstdlib": "c",
+      "process.h": "c",
+      "syscall.h": "c"
     },
     "C_Cpp.default.defines": [
 		"USERPROG"
 		// "VM", // uncomment this line when you start Task 3
-	]
+    ],
+    "editor.formatOnSaveMode": "modifications",
+    "clang-format.executable": "/usr/bin/clang-format",
+    "editor.formatOnSave": true
 }
