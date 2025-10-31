@@ -1,6 +1,7 @@
 {
     "files.associations": {
-        "synch.h": "c"
+        "synch.h": "c",
+        "cstdlib": "c"
     },
     "C_Cpp.default.defines": [
 		"USERPROG"

@@ -129,6 +129,9 @@ start_process (void *args_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while (true)
+  {
+  }
   return PROC_ERR;
 }
 
