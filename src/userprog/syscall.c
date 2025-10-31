@@ -19,7 +19,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   process_exit (PROC_ERR);
 }
 
-static int write(int fd, const void* buffer, unsigned size) {
+int write(int fd, const void* buffer, unsigned size) {
 
   if (buffer == NULL) {
     return 0;
