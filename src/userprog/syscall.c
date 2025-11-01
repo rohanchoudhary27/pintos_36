@@ -2,11 +2,9 @@
 #include "threads/interrupt.h"
 #include "userprog/process.h"
 
+#include "lib/syscall-nr.h"
 #include <inttypes.h>
 #include <stdio.h>
-#include <syscall-nr.h>
-
-static void syscall_handler (struct intr_frame *);
 
 typedef void(syscall)(struct intr_frame*);
 
@@ -15,11 +13,16 @@ typedef void(syscall)(struct intr_frame*);
 /* For now, let's store the table as an array with indices representing
     syscall numbers, and the value being the function pointer. Maybe we
     can in the future turn this into hashmap. */
-static syscall* syscall_map[NUMBER_OF_SYSCALLS];
+static syscall* syscall_map[NUMBER_OF_SYSCALLS] = {
+    [SYS_HALT] = halt,   [SYS_EXIT] = exit,         [SYS_EXEC] = exec,
+    [SYS_WAIT] = wait,   [SYS_CREATE] = create,     [SYS_REMOVE] = remove,
+    [SYS_OPEN] = open,   [SYS_FILESIZE] = filesize, [SYS_READ] = read,
+    [SYS_WRITE] = write, [SYS_SEEK] = seek,         [SYS_TELL] = tell,
+    [SYS_CLOSE] = close};
 
-static void init_syscalls_map() {
-  // syscall_map[SYS_WRITE] = ....
-}
+// static void init_syscalls_map() {
+//  syscall_map[SYS_WRITE] = ....
+//}
 
 void syscall_init(void) {
   init_syscall_map();
@@ -37,13 +40,15 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
   // Ideally, we want to have a function that can read from
   // user stack while doing validation, and return 4 byte
   // words from the stack.
-  uint32_t* sys_no_addr = (uint32_t*)f->esp;
-  return *sys_no_addr;
+  if (!is_user_vaddr(f->esp)) {
+    exit(PROC_ERR);
+  }
+  return *(uint32_t*)f->esp;
 }
 
 /* --- System call Functions --- */
 
-/* Write: size number of bytes from buffer to fd */
+/* write: size number of bytes from buffer to fd */
 int write(int fd, const void* buffer, unsigned size) {
   if (buffer == NULL) {
     return 0;
@@ -57,3 +62,8 @@ int write(int fd, const void* buffer, unsigned size) {
 
 /* halt: terminates the entire OS by calling shutdown_power_off. */
 void halt(void) { shutdown_power_off(); }
+
+/* exit: terminates a user process by calling process_exit. */
+void exit(int status) { process_exit(status); }
+
+int wait(pid_t pid) { process_wait() }

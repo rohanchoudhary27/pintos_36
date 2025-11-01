@@ -9,14 +9,25 @@
 /* A user process, wrapped around a kernel thread. */
 struct process
   {
-    uint32_t *pagedir;      /* Process page directory. */
-    struct thread *thread;  /* Process underlying kernel thread. */
-  };
+  uint32_t* pagedir;          /* Process page directory. */
+  struct thread* thread;      /* Process underlying kernel thread. */
+  struct process* parent;     /* Parent of the process. */
+  struct list children;       /* List of child process tid's. */
+  int exit_status;            /* Current exit status of the process. */
+  struct semaphore wait_sema; /* Semaphore for the children processes the
+                                 process is waiting for. */
+};
 
-void root_process_init (void);
-tid_t process_execute (const char *cmd_line);
-int process_wait (tid_t);
-void process_exit (int) NO_RETURN;
-void process_activate (void);
+struct child_process {
+  tid_t tid;       /*The tid of the child. */
+  int exit_status; /* Exit status of child. */
+  bool has_exited; /* Flag for whether child process has exited. */
+};
+
+void root_process_init(void);
+tid_t process_execute(const char* cmd_line);
+int process_wait(tid_t);
+void process_exit(int) NO_RETURN;
+void process_activate(void);
 
 #endif /* userprog/process.h */
