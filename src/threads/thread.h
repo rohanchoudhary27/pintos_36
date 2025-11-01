@@ -176,4 +176,6 @@ void thread_update_all_recent_cpu(void);
 void thread_update_priority(struct thread *t, void *aux);
 void thread_update_all_priority(void);
 
+struct thread* thread_get_by_tid(tid);
+
 #endif /* threads/thread.h */
