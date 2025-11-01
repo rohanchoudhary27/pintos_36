@@ -41,7 +41,8 @@ root_process_init (void)
 tid_t
 process_execute (const char *cmd_line) 
 {
-  char *cmd_line_copy;
+  struct thread* cur = thread_current();
+  char* cmd_line_copy;
   tid_t tid;
 
   /* Make a copy of CMD_LINE.
@@ -53,9 +54,25 @@ process_execute (const char *cmd_line)
 
   /* Create a new thread to execute CMD_LINE. */
   tid = thread_create (cmd_line, PRI_DEFAULT, start_process, cmd_line_copy);
-  if (tid == TID_ERROR)
+  if (tid == TID_ERROR) {
     palloc_free_page (cmd_line_copy);
-    
+    return TID_ERROR;
+  }
+
+  struct child_process* child_p = malloc(sizeof *child_p);
+  ASSERT(child_p != NULL);
+
+  child_p->tid = tid;
+  child_p->exit_status = PROC_ERR;
+  child_p->has_exited = false;
+  sema_init(&child_p->wait_sema, 0);
+  list_push_back(&cur->process->children, &child_p->elem);
+
+  struct thread* child_thread = thread_get_by_tid(tid);
+  if (child_thread == NULL && child_thread->process != NULL) {
+    child_thread->process->parent = cur->process;
+  }
+
   return tid;
 }
 
@@ -71,7 +88,10 @@ process_init (struct thread *t)
   /* Initialise process attributes. */
   process->pagedir = NULL;
   process->thread = t;
-  
+  process->parent = NULL;
+  list_init(&process->children);
+  process->exit_status = PROC_ERR;
+
   /* Link thread to its process. */
   t->process = process;
   return true;
