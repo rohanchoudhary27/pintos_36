@@ -39,9 +39,12 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
   // words from the stack.
   uint32_t* sys_no_addr = (uint32_t*)f->esp;
   return *sys_no_addr;
+}
 
+/* --- System call Functions --- */
+
+/* Write: size number of bytes from buffer to fd */
 int write(int fd, const void* buffer, unsigned size) {
-
   if (buffer == NULL) {
     return 0;
   }
@@ -50,5 +53,7 @@ int write(int fd, const void* buffer, unsigned size) {
     return size;
   }
   return 0;
-
 }
+
+/* halt: terminates the entire OS by calling shutdown_power_off. */
+void halt(void) { shutdown_power_off(); }
