@@ -39,4 +39,16 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
   // words from the stack.
   uint32_t* sys_no_addr = (uint32_t*)f->esp;
   return *sys_no_addr;
+
+int write(int fd, const void* buffer, unsigned size) {
+
+  if (buffer == NULL) {
+    return 0;
+  }
+  if (fd == 1) {
+    putbuf(buffer, size);
+    return size;
+  }
+  return 0;
+
 }
