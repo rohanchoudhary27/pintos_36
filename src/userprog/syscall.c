@@ -66,4 +66,4 @@ void halt(void) { shutdown_power_off(); }
 /* exit: terminates a user process by calling process_exit. */
 void exit(int status) { process_exit(status); }
 
-int wait(pid_t pid) { process_wait() }
+int wait(pid_t pid) { process_wait(); }

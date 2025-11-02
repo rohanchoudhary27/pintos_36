@@ -35,6 +35,11 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
+void parse_cmd_line(const char* cmd_line, char** argv, int argc) {
+  char* copy = palloc_get_page(0);
+  ASSERT(copy != NULL);
+}
+
 /* Starts a new thread running a user program loaded from CMD_LINE.
    The new thread may be scheduled (and may even exit) before process_execute() returns.
    Returns the new process's thread id, or TID_ERROR if the thread cannot be created. */
@@ -53,15 +58,15 @@ process_execute (const char *cmd_line)
   strlcpy (cmd_line_copy, cmd_line, PGSIZE);
 
   /* Create a new thread to execute CMD_LINE. */
+  enum intr_level old_level = intr_disable();
   tid = thread_create (cmd_line, PRI_DEFAULT, start_process, cmd_line_copy);
   if (tid == TID_ERROR) {
     palloc_free_page (cmd_line_copy);
+    intr_set_level(old_level);
     return TID_ERROR;
   }
 
-  struct child_process* child_p = malloc(sizeof *child_p);
-  ASSERT(child_p != NULL);
-
+  struct child_process* child_p;
   child_p->tid = tid;
   child_p->exit_status = PROC_ERR;
   child_p->has_exited = false;
@@ -72,7 +77,7 @@ process_execute (const char *cmd_line)
   if (child_thread == NULL && child_thread->process != NULL) {
     child_thread->process->parent = cur->process;
   }
-
+  intr_set_level(old_level);
   return tid;
 }
 
