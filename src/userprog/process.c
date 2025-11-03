@@ -35,9 +35,21 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
-void parse_cmd_line(const char* cmd_line, char** argv, int argc) {
+void parse_cmd_line(const char* cmd_line, char** argv, int* argc) {
   char* copy = palloc_get_page(0);
   ASSERT(copy != NULL);
+
+  strlcpy(copy, cmd_line, PGSIZE);
+
+  char* token;
+  char* save_ptr;
+  *argc = 0;
+
+  token = strtok_r(copy, " ", &save_ptr);
+  while (token != NULL) {
+    argv[(*argc)++] = token;
+    token = strtok_r(NULL, " ", &save_ptr);
+  }
 }
 
 /* Starts a new thread running a user program loaded from CMD_LINE.
