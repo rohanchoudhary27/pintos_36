@@ -4,13 +4,23 @@
       "cstdlib": "c",
       "process.h": "c",
       "syscall.h": "c",
-      "interrupt.h": "c"
+      "interrupt.h": "c",
+      "stdbool.h": "c",
+      "syscall-nr.h": "c",
+      "inttypes.h": "c"
     },
     "C_Cpp.default.defines": [
-		"USERPROG"
-		// "VM", // uncomment this line when you start Task 3
+		  "USERPROG"
+		  // "VM", // uncomment this line when you start Task 3
     ],
     "editor.formatOnSaveMode": "modifications",
     "clang-format.executable": "/usr/bin/clang-format",
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/src/lib",
+        "${workspaceFolder}/src/lib/user",
+        "${workspaceFolder}/src/lib/kernel",
+    ]
 }
