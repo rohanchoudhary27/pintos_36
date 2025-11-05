@@ -116,9 +116,10 @@ process_init (struct thread *t)
 
 /* A thread function that loads a user process and starts it
    running. */
-static void
-start_process (void *args_)
-{
+static void start_process(void* args_) {
+  char* argv[PGSIZE / sizeof(char*)];
+  int argc = 0;
+  parse_cmd_line(args_, &argv, &argc);
   struct thread *cur = thread_current ();
   char *file_name = args_;
   struct intr_frame if_;
@@ -135,6 +136,9 @@ start_process (void *args_)
       if_.cs = SEL_UCSEG;
       if_.eflags = FLAG_IF | FLAG_MBS;
       success = load (file_name, &if_.eip, &if_.esp);
+      if (success) {
+        success = push_arguments(&if_.esp, argv, argc);
+      }
     }
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
