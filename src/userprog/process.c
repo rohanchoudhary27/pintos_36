@@ -126,6 +126,50 @@ process_init (struct thread *t)
   return true;
 }
 
+static void push_data(void** esp, const void* data, size_t bytes) {
+  *esp -= bytes;
+  memcpy(*esp, data, bytes);
+}
+
+static void push_null(void** esp) {
+  *esp -= sizeof(void*);
+  memset(*esp, 0, sizeof(void*));
+}
+
+static void align_stack(void** esp, size_t align) {
+  uintptr_t misalign = (uintptr_t)(*esp) % align;
+  if (misalign != 0) {
+    *esp -= misalign;
+    memset(*esp, 0, misalign);
+  }
+}
+
+static bool push_arguments(void** esp, char** argv, int argc) {
+  char* arg_addrs[argc];
+
+  for (int i = argc - 1; i >= 0; i--) {
+    size_t len = strlen(argv[i]) + 1;
+    push_data(esp, argv[i], len);
+    arg_addrs[i] = *esp;
+  }
+
+  align_stack(esp, 8);
+
+  push_null(esp);
+
+  for (int i = argc - 1; i >= 0; i--) {
+    push_data(esp, &arg_addrs[i], sizeof(char*));
+  }
+
+  char** argv_addr = *esp;
+  push_data(esp, &argv_addr, sizeof(char**));
+
+  push_data(esp, &argc, sizeof(int));
+  push_null(esp);
+
+  return true;
+}
+
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* args_) {
@@ -147,7 +191,7 @@ static void start_process(void* args_) {
       if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
       if_.cs = SEL_UCSEG;
       if_.eflags = FLAG_IF | FLAG_MBS;
-      success = load (file_name, &if_.eip, &if_.esp);
+      success = load(argv[0], &if_.eip, &if_.esp);
       if (success) {
         success = push_arguments(&if_.esp, argv, argc);
       }
