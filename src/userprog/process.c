@@ -35,21 +35,33 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
-void parse_cmd_line(const char* cmd_line, char** argv, int* argc) {
+char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* copy = palloc_get_page(0);
   ASSERT(copy != NULL);
 
   strlcpy(copy, cmd_line, PGSIZE);
 
-  char* token;
   char* save_ptr;
-  *argc = 0;
+  char* token;
 
-  token = strtok_r(copy, " ", &save_ptr);
-  while (token != NULL) {
-    argv[(*argc)++] = token;
-    token = strtok_r(NULL, " ", &save_ptr);
-  }
+  char* token = strtok_r(copy, " ", &save_ptr);
+  int count = 0;
+
+  for (token = strtok_r(copy, " ", &save_ptr); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr))
+    count++;
+
+  *argc = count;
+
+  char** argv[*argc];
+  char *save_ptr_ii;
+  strlcpy(copy, cmd_line, PGSIZE);
+
+  int i = 0;
+  for (token = strtok_r(copy, " ", &save_ptr_ii); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr_ii))
+    argv[i++] = token;
+  return argv;
 }
 
 /* Starts a new thread running a user program loaded from CMD_LINE.
@@ -117,9 +129,9 @@ process_init (struct thread *t)
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* args_) {
-  char* argv[PGSIZE / sizeof(char*)];
+  // char* argv = malloc(PGSIZE / sizeof(char*));
   int argc = 0;
-  parse_cmd_line(args_, &argv, &argc);
+  char** argv = parse_cmd_line(args_, &argc);
   struct thread *cur = thread_current ();
   char *file_name = args_;
   struct intr_frame if_;
