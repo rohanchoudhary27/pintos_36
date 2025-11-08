@@ -11,6 +11,7 @@ struct process
   {
     uint32_t *pagedir;      /* Process page directory. */
     struct thread *thread;  /* Process underlying kernel thread. */
+    struct file *file;      /* Process executable file */
   };
 
 void root_process_init (void);

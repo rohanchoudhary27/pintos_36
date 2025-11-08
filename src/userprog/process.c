@@ -138,6 +138,7 @@ process_exit (int exit_code UNUSED)
 {
   struct process *cur = thread_current ()->process;
   uint32_t *pd;
+  struct file *file;
   
   /* Clean up all process memory footprint, if it exists. */
   if (cur != NULL)
@@ -159,6 +160,17 @@ process_exit (int exit_code UNUSED)
           pagedir_activate (NULL);
           pagedir_destroy (pd);
         }
+
+      /* Allow access to the current process's executable file if
+         the process is exit */
+      file = cur->file;
+      if (file != NULL) {
+        /* Don't have to file allow write as file close does that
+           but left it to be explicit about intent */
+        file_allow_write(file); 
+        file_close(file);
+        cur->file = NULL;
+      }
   
       /* Finally, destroy the current process's struct */
       thread_current ()->process = NULL;
@@ -283,6 +295,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
+  cur->file = file;
+  file_deny_write(file);
+
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -366,7 +381,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+
+  /* If load failed, clean up the executable file if it was opened. */
+  if (!success) {
+    if (file != NULL) {
+      file_close (file);
+    }
+    cur->file = NULL;
+  }
   return success;
 }
 
