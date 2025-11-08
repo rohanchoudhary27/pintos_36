@@ -71,6 +71,8 @@ process_init (struct thread *t)
   /* Initialise process attributes. */
   process->pagedir = NULL;
   process->thread = t;
+  list_init(&process->fd_table);
+  process->next_fd = FD_BEGIN;
   
   /* Link thread to its process. */
   t->process = process;
@@ -537,4 +539,80 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (cur->pagedir, upage) == NULL
           && pagedir_set_page (cur->pagedir, upage, kpage, writable));
+}
+
+/* Returns the file that corresponds to the given file descriptor
+   from the current process. */
+struct file *
+process_get_file(int fd)
+{
+    struct process *cur = thread_current ()->process;
+    struct list_elem *e;
+
+    for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
+    {
+        struct file_desc *f = list_entry(e, struct file_desc, elem);
+        if (f->fd == fd)
+            return f->file;
+    }
+    return NULL;
+}
+
+/* Add a file to the current process and return the file
+   descriptor (fd) as a return value. */
+int
+process_add_file(struct file *f)
+{
+    if (f == NULL)
+        return -1;
+
+    struct process *cur = thread_current ()->process;
+    struct file_desc *fd = malloc(sizeof *fd);
+    if (fd == NULL)
+    {
+        file_close(f);
+        return -1;
+    }
+
+    fd->fd = cur->next_fd++;
+    fd->file = f;
+    list_push_back(&cur->fd_table, &fd->elem);
+    return fd->fd;
+}
+
+/* Removes a file from the current process. */
+void
+process_close_file(int fd)
+{
+  if (fd == NULL)
+      return;
+
+  struct process *cur = thread_current ()->process;
+  struct list_elem *e;
+
+  for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
+  {
+      struct file_desc *f = list_entry(e, struct file_desc, elem);
+      if (f->fd == fd) {
+        file_close(f->file);
+        free(f);
+        return;
+      }
+  }
+}
+
+/* Close all of the open files the current process has. */
+void
+process_close_all_files(void)
+{
+    struct process *cur = thread_current ()->process;
+    struct list_elem *e = list_begin(&cur->fd_table);
+
+    while (e != list_end(&cur->fd_table))
+    {
+        struct file_desc *f = list_entry(e, struct file_desc, elem);
+        e = list_remove(&f->elem);
+        file_close(f->file);
+        free(f);
+    }
 }
