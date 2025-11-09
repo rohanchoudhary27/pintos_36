@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "devices/input.h"
 #include "threads/interrupt.h"
 #include "userprog/process.h"
 
@@ -48,6 +49,20 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
 
 /* --- System call Functions --- */
 
+/* read: */
+int read(int fd, void* buffer, unsigned size) {
+  if (buffer == NULL) {
+    return -1;
+  }
+  if (fd == 0) {
+    for (uint32_t i = 0; i < size; i++) {
+      ((uint8_t*)buffer)[i] = input_getc();
+    }
+    return size;
+  }
+  return -1;
+}
+
 /* write: size number of bytes from buffer to fd */
 int write(int fd, const void* buffer, unsigned size) {
   if (buffer == NULL) {
@@ -59,6 +74,13 @@ int write(int fd, const void* buffer, unsigned size) {
   }
   return 0;
 }
+
+/* seek: */
+void seek(int fd, unsigned position) {}
+
+unsigned tell(int fd) {}
+
+void close(int fd) {}
 
 /* halt: terminates the entire OS by calling shutdown_power_off. */
 void halt(void) { shutdown_power_off(); }
