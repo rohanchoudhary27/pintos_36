@@ -1,7 +1,9 @@
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
 
+#include "filesys/file.h"
 #include "lib/stdbool.h"
+#include "process.h"
 
 void syscall_init (void);
 static void syscall_handler(struct intr_frame*);

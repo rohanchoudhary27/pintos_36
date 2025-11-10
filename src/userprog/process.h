@@ -10,22 +10,24 @@
    for input and output file */
 #define FD_BEGIN (2)
 
+/* file descriptor values that corresponds to input and output files */
+#define INPUT_FILE_FD (0)
+#define OUTPUT_FILE_FD (1)
+
 /* File descriptor to file pairs struct that can be added to lists */
-struct file_desc
-  {
-    int fd;
-    struct file *file;
-    struct list_elem elem;
-  };
+struct file_desc {
+  int fd;
+  struct file* file;
+  struct list_elem elem;
+};
 
 /* A user process, wrapped around a kernel thread. */
-struct process
-  {
+struct process {
   uint32_t* pagedir;          /* Process page directory. */
   struct thread* thread;      /* Process underlying kernel thread. */
-    struct file *file;      /* Process executable file */
-    struct list fd_table;   /* List that contains fd file pairs */
-    uint32_t next_fd;       /* The next file descriptor value */
+  struct file* file;          /* Process executable file */
+  struct list fd_table;       /* List that contains fd file pairs */
+  uint32_t next_fd;           /* The next file descriptor value */
   struct process* parent;     /* Parent of the process. */
   struct list children;       /* List of child_process. */
   int exit_status;            /* Current exit status of the process. */
