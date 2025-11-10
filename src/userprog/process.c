@@ -120,6 +120,8 @@ process_init (struct thread *t)
   process->parent = NULL;
   list_init(&process->children);
   process->exit_status = PROC_ERR;
+  list_init(&process->fd_table);
+  process->next_fd = FD_BEGIN;
 
   /* Link thread to its process. */
   t->process = process;
@@ -235,6 +237,7 @@ process_exit (int exit_code UNUSED)
 {
   struct process *cur = thread_current ()->process;
   uint32_t *pd;
+  struct file *file;
   
   /* Clean up all process memory footprint, if it exists. */
   if (cur != NULL)
@@ -256,6 +259,17 @@ process_exit (int exit_code UNUSED)
           pagedir_activate (NULL);
           pagedir_destroy (pd);
         }
+
+      /* Allow access to the current process's executable file if
+         the process is exit */
+      file = cur->file;
+      if (file != NULL) {
+        /* Don't have to file allow write as file close does that
+           but left it to be explicit about intent */
+        file_allow_write(file); 
+        file_close(file);
+        cur->file = NULL;
+      }
   
       /* Finally, destroy the current process's struct */
         printf("<%s>: exit(%d)\n", thread_current()->name, exit_code);
@@ -381,6 +395,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
+  cur->file = file;
+  file_deny_write(file);
+
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -464,7 +481,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+
+  /* If load failed, clean up the executable file if it was opened. */
+  if (!success) {
+    if (file != NULL) {
+      file_close (file);
+    }
+    cur->file = NULL;
+  }
   return success;
 }
 
@@ -613,4 +637,80 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (cur->pagedir, upage) == NULL
           && pagedir_set_page (cur->pagedir, upage, kpage, writable));
+}
+
+/* Returns the file that corresponds to the given file descriptor
+   from the current process. */
+struct file *
+process_get_file(int fd)
+{
+    struct process *cur = thread_current ()->process;
+    struct list_elem *e;
+
+    for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
+    {
+        struct file_desc *f = list_entry(e, struct file_desc, elem);
+        if (f->fd == fd)
+            return f->file;
+    }
+    return NULL;
+}
+
+/* Add a file to the current process and return the file
+   descriptor (fd) as a return value. */
+int
+process_add_file(struct file *f)
+{
+    if (f == NULL)
+        return -1;
+
+    struct process *cur = thread_current ()->process;
+    struct file_desc *fd = malloc(sizeof *fd);
+    if (fd == NULL)
+    {
+        file_close(f);
+        return -1;
+    }
+
+    fd->fd = cur->next_fd++;
+    fd->file = f;
+    list_push_back(&cur->fd_table, &fd->elem);
+    return fd->fd;
+}
+
+/* Removes a file from the current process. */
+void
+process_close_file(int fd)
+{
+  if (fd == NULL)
+      return;
+
+  struct process *cur = thread_current ()->process;
+  struct list_elem *e;
+
+  for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
+  {
+      struct file_desc *f = list_entry(e, struct file_desc, elem);
+      if (f->fd == fd) {
+        file_close(f->file);
+        free(f);
+        return;
+      }
+  }
+}
+
+/* Close all of the open files the current process has. */
+void
+process_close_all_files(void)
+{
+    struct process *cur = thread_current ()->process;
+    struct list_elem *e = list_begin(&cur->fd_table);
+
+    while (e != list_end(&cur->fd_table))
+    {
+        struct file_desc *f = list_entry(e, struct file_desc, elem);
+        e = list_remove(&f->elem);
+        file_close(f->file);
+        free(f);
+    }
 }
