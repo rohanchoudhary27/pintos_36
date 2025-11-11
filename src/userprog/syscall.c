@@ -36,6 +36,10 @@ void syscall_init(void) {
 
 static void syscall_handler(struct intr_frame* f) {
   int syscall_no = get_syscall_number_from_frame(f);
+  int num_syscall_funcs = sizeof(syscall_map) / sizeof(syscall_map[0]);
+  if (syscall_no < num_syscall_funcs || syscall_no >= num_syscall_funcs) {
+    exit_and_set_process_status(PROC_ERR);
+  }
   syscall_map[syscall_no](f);
 }
 
@@ -43,9 +47,8 @@ static void syscall_handler(struct intr_frame* f) {
    address is invalid, i.e., address is in the user space, not null, and is
    mapped. */
 static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
+  kill_process_if_user_data_invalid(f->esp, 32);
   uint32_t* esp = (uint32_t*)f->esp;
-  kill_process_if_user_addr_invalid(esp);
-
   uint32_t syscall_no = *esp;
   return syscall_no;
 }
@@ -57,6 +60,21 @@ static void kill_process_if_user_addr_invalid(const void* addr) {
   void* phy_addr = pagedir_get_page(thread_current()->process->pagedir, addr);
   if (addr == NULL || !is_user_vaddr(addr) || phy_addr == NULL) {
     exit_and_set_process_status(PROC_ERR);
+  }
+}
+
+static void kill_process_if_user_data_invalid(const void* data_addr,
+                                              unsigned size) {
+  uintptr_t addrptr = (uintptr_t)data_addr;
+  uintptr_t endptr = addrptr + size;
+  uintptr_t pg_boundry = (uintptr_t)pg_round_down(data_addr);
+  while (addrptr < endptr) {
+    kill_process_if_user_addr_invalid((void*)addrptr);
+    pg_boundry += PGSIZE;
+    if (pg_boundry < endptr)
+      addrptr = pg_boundry;
+    else
+      addrptr = endptr;
   }
 }
 
