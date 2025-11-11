@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include "devices/shutdown.h"
+#include "devices/input.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -109,7 +110,54 @@ static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
    frame's eax field. Each of the syscalls will get their arguments through the
    macro intr_stack_arg, passing the esp and the argument index. */
 
+int filesize(int fd) {
+  /* If the fd corresponds to input or output files we return 0
+    as we don't have file objects for them */
+  if (fd < FD_BEGIN)
+    return 0;
+
+  /* For any other case return the size of the file */
+  struct file* file = process_get_file(fd);
+  if (file == NULL) { /* Return 0 if the file is NULL */
+    return 0;
+  }
+  int length = file_length(file);
+
+  return length;
+}
+
+/* read: */
+int read(int fd, void* buffer, unsigned size) {
+  if (buffer == NULL) {
+    return -1; // Buffer is NULL so return -1
+  }
+
+  if (fd == OUTPUT_FILE_FD) {
+    return -1; // Can't read from output file so return -1
+  }
+
+  if (fd == INPUT_FILE_FD) {
+    for (uint32_t i = 0; i < size; i++) {
+      ((uint8_t*)buffer)[i] = input_getc();
+    }
+    return size;
+  }
+
+  /* Otherwise write to the file from the position specified
+    in it's properties */
+  struct file* file = process_get_file(fd);
+
+  if (file == NULL)
+    return -1; // If no file is found with given fd return -1
+
+  unsigned offset = file_tell(file);
+  int bytes_read = file_read_at(file, buffer, size, offset);
+
+  return bytes_read;
+}
+
 /* write: size number of bytes from buffer to fd */
+<<<<<<< src/userprog/syscall.c
 // void sys_write(struct intr_frame* f) {
 //   if (buffer == NULL) {
 //     return 0;
@@ -120,6 +168,76 @@ static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
 //   }
 //   return 0;
 // }
+=======
+int write(int fd, const void* buffer, unsigned size) {
+  if (buffer == NULL) {
+    return 0;
+  }
+
+  if (fd == INPUT_FILE_FD) {
+    return 0; // Can't write to input file so return 0
+  }
+
+  if (fd == OUTPUT_FILE_FD) {
+    putbuf(buffer, size);
+    return size;
+  }
+
+  /* Otherwise write to the file from the position specified
+     in it's properties */
+  struct file* file = process_get_file(fd);
+
+  if (file == NULL)
+    return 0; // If no file is found with given fd return -1
+
+  unsigned offset = file_tell(file);
+  int bytes_written = file_write_at(file, buffer, size, offset);
+
+  return bytes_written;
+}
+
+/* seek: */
+void seek(int fd, unsigned position) {
+  /* If the fd corresponds to input or output files we return
+    as we don't have file objects for them */
+  if (fd < FD_BEGIN)
+    return;
+
+  /* For any other case set the position on files */
+  struct file* file = process_get_file(fd);
+  if (file == NULL) { /* Return 0 if the file is NULL */
+    return 0;
+  }
+  file_seek(file, position);
+}
+
+unsigned tell(int fd) {
+  /* If the fd corresponds to input or output files we return 0
+     as we don't have file objects for them */
+  if (fd < FD_BEGIN)
+    return 0;
+
+  /* For any other case return the position property of the
+     file object */
+  struct file* file = process_get_file(fd);
+  if (file == NULL) { /* Return 0 if the file is NULL */
+    return 0;
+  }
+  unsigned offset = file_tell(file);
+
+  return offset;
+}
+
+void close(int fd) {
+  /* If the fd corresponds to input or output files we return
+     as we can't close them */
+  if (fd < FD_BEGIN)
+    return;
+
+  /* For any other case we close the file directly */
+  process_close_file(fd);
+}
+>>>>>>> src/userprog/syscall.c
 
 /* halt: terminates the entire OS by calling shutdown_power_off. */
 void sys_halt(struct intr_frame* f UNUSED) { shutdown_power_off(); }
@@ -127,4 +245,8 @@ void sys_halt(struct intr_frame* f UNUSED) { shutdown_power_off(); }
 /* exit: terminates a user process by calling process_exit. */
 // void sys_exit(struct intr_frame* f) { process_exit(status); }
 
+<<<<<<< src/userprog/syscall.c
 // void sys_wait(struct intr_frame* f) { process_wait() }
+=======
+int wait(pid_t pid) { process_wait(); }
+>>>>>>> src/userprog/syscall.c

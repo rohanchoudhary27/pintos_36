@@ -1,9 +1,11 @@
 #ifndef USERPROG_SYSCALL_H
 #define USERPROG_SYSCALL_H
 
+#include "filesys/file.h"
 #include "lib/stdbool.h"
 #include "threads/interrupt.h"
-// #include "lib/user/syscall.h"
+#include "process.h"
+
 
 typedef void(syscall)(struct intr_frame*);
 

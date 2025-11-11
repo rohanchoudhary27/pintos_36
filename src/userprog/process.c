@@ -35,13 +35,43 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
+char** parse_cmd_line(const char* cmd_line, int* argc) {
+  char* copy = palloc_get_page(0);
+  ASSERT(copy != NULL);
+
+  strlcpy(copy, cmd_line, PGSIZE);
+
+  char* save_ptr;
+  char* token;
+
+  char* token = strtok_r(copy, " ", &save_ptr);
+  int count = 0;
+
+  for (token = strtok_r(copy, " ", &save_ptr); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr))
+    count++;
+
+  *argc = count;
+
+  char** argv[*argc];
+  char *save_ptr_ii;
+  strlcpy(copy, cmd_line, PGSIZE);
+
+  int i = 0;
+  for (token = strtok_r(copy, " ", &save_ptr_ii); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr_ii))
+    argv[i++] = token;
+  return argv;
+}
+
 /* Starts a new thread running a user program loaded from CMD_LINE.
    The new thread may be scheduled (and may even exit) before process_execute() returns.
    Returns the new process's thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
 process_execute (const char *cmd_line) 
 {
-  char *cmd_line_copy;
+  struct thread* cur = thread_current();
+  char* cmd_line_copy;
   tid_t tid;
 
   /* Make a copy of CMD_LINE.
@@ -52,10 +82,26 @@ process_execute (const char *cmd_line)
   strlcpy (cmd_line_copy, cmd_line, PGSIZE);
 
   /* Create a new thread to execute CMD_LINE. */
+  enum intr_level old_level = intr_disable();
   tid = thread_create (cmd_line, PRI_DEFAULT, start_process, cmd_line_copy);
-  if (tid == TID_ERROR)
+  if (tid == TID_ERROR) {
     palloc_free_page (cmd_line_copy);
-    
+    intr_set_level(old_level);
+    return TID_ERROR;
+  }
+
+  struct child_process* child_p;
+  child_p->tid = tid;
+  child_p->exit_status = PROC_ERR;
+  child_p->has_exited = false;
+  sema_init(&child_p->wait_sema, 0);
+  list_push_back(&cur->process->children, &child_p->elem);
+
+  struct thread* child_thread = thread_get_by_tid(tid);
+  if (child_thread == NULL && child_thread->process != NULL) {
+    child_thread->process->parent = cur->process;
+  }
+  intr_set_level(old_level);
   return tid;
 }
 
@@ -71,18 +117,67 @@ process_init (struct thread *t)
   /* Initialise process attributes. */
   process->pagedir = NULL;
   process->thread = t;
-  lock_init(&process->process_lock);
+  process->parent = NULL;
+  list_init(&process->children);
+  process->exit_status = PROC_ERR;
+  list_init(&process->fd_table);
+  process->next_fd = FD_BEGIN;
 
   /* Link thread to its process. */
   t->process = process;
   return true;
 }
 
+static void push_data(void** esp, const void* data, size_t bytes) {
+  *esp -= bytes;
+  memcpy(*esp, data, bytes);
+}
+
+static void push_null(void** esp) {
+  *esp -= sizeof(void*);
+  memset(*esp, 0, sizeof(void*));
+}
+
+static void align_stack(void** esp, size_t align) {
+  uintptr_t misalign = (uintptr_t)(*esp) % align;
+  if (misalign != 0) {
+    *esp -= misalign;
+    memset(*esp, 0, misalign);
+  }
+}
+
+static bool push_arguments(void** esp, char** argv, int argc) {
+  char* arg_addrs[argc];
+
+  for (int i = argc - 1; i >= 0; i--) {
+    size_t len = strlen(argv[i]) + 1;
+    push_data(esp, argv[i], len);
+    arg_addrs[i] = *esp;
+  }
+
+  align_stack(esp, 8);
+
+  push_null(esp);
+
+  for (int i = argc - 1; i >= 0; i--) {
+    push_data(esp, &arg_addrs[i], sizeof(char*));
+  }
+
+  char** argv_addr = *esp;
+  push_data(esp, &argv_addr, sizeof(char**));
+
+  push_data(esp, &argc, sizeof(int));
+  push_null(esp);
+
+  return true;
+}
+
 /* A thread function that loads a user process and starts it
    running. */
-static void
-start_process (void *args_)
-{
+static void start_process(void* args_) {
+  // char* argv = malloc(PGSIZE / sizeof(char*));
+  int argc = 0;
+  char** argv = parse_cmd_line(args_, &argc);
   struct thread *cur = thread_current ();
   char *file_name = args_;
   struct intr_frame if_;
@@ -98,7 +193,10 @@ start_process (void *args_)
       if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
       if_.cs = SEL_UCSEG;
       if_.eflags = FLAG_IF | FLAG_MBS;
-      success = load (file_name, &if_.eip, &if_.esp);
+      success = load(argv[0], &if_.eip, &if_.esp);
+      if (success) {
+        success = push_arguments(&if_.esp, argv, argc);
+      }
     }
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
@@ -139,6 +237,7 @@ process_exit (int exit_code UNUSED)
 {
   struct process *cur = thread_current ()->process;
   uint32_t *pd;
+  struct file *file;
   
   /* Clean up all process memory footprint, if it exists. */
   if (cur != NULL)
@@ -160,6 +259,17 @@ process_exit (int exit_code UNUSED)
           pagedir_activate (NULL);
           pagedir_destroy (pd);
         }
+
+      /* Allow access to the current process's executable file if
+         the process is exit */
+      file = cur->file;
+      if (file != NULL) {
+        /* Don't have to file allow write as file close does that
+           but left it to be explicit about intent */
+        file_allow_write(file); 
+        file_close(file);
+        cur->file = NULL;
+      }
   
       /* Finally, destroy the current process's struct */
         printf("<%s>: exit(%d)\n", thread_current()->name, exit_code);
@@ -285,6 +395,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
+  cur->file = file;
+  file_deny_write(file);
+
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -368,7 +481,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+
+  /* If load failed, clean up the executable file if it was opened. */
+  if (!success) {
+    if (file != NULL) {
+      file_close (file);
+    }
+    cur->file = NULL;
+  }
   return success;
 }
 
@@ -517,4 +637,80 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (cur->pagedir, upage) == NULL
           && pagedir_set_page (cur->pagedir, upage, kpage, writable));
+}
+
+/* Returns the file that corresponds to the given file descriptor
+   from the current process. */
+struct file *
+process_get_file(int fd)
+{
+    struct process *cur = thread_current ()->process;
+    struct list_elem *e;
+
+    for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
+    {
+        struct file_desc *f = list_entry(e, struct file_desc, elem);
+        if (f->fd == fd)
+            return f->file;
+    }
+    return NULL;
+}
+
+/* Add a file to the current process and return the file
+   descriptor (fd) as a return value. */
+int
+process_add_file(struct file *f)
+{
+    if (f == NULL)
+        return -1;
+
+    struct process *cur = thread_current ()->process;
+    struct file_desc *fd = malloc(sizeof *fd);
+    if (fd == NULL)
+    {
+        file_close(f);
+        return -1;
+    }
+
+    fd->fd = cur->next_fd++;
+    fd->file = f;
+    list_push_back(&cur->fd_table, &fd->elem);
+    return fd->fd;
+}
+
+/* Removes a file from the current process. */
+void
+process_close_file(int fd)
+{
+  if (fd == NULL)
+      return;
+
+  struct process *cur = thread_current ()->process;
+  struct list_elem *e;
+
+  for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
+  {
+      struct file_desc *f = list_entry(e, struct file_desc, elem);
+      if (f->fd == fd) {
+        file_close(f->file);
+        free(f);
+        return;
+      }
+  }
+}
+
+/* Close all of the open files the current process has. */
+void
+process_close_all_files(void)
+{
+    struct process *cur = thread_current ()->process;
+    struct list_elem *e = list_begin(&cur->fd_table);
+
+    while (e != list_end(&cur->fd_table))
+    {
+        struct file_desc *f = list_entry(e, struct file_desc, elem);
+        e = list_remove(&f->elem);
+        file_close(f->file);
+        free(f);
+    }
 }
