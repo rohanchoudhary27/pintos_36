@@ -148,7 +148,19 @@ static void sys_create(struct intr_frame *f) {
 
 }
 
-int filesize(int fd) {
+static void sys_remove(struct intr_frame* f) {
+  const char* file_n = intr_stack_arg(const char*, f->esp, 1);
+  // TODO: validate the data
+  lock_acquire(&global_file_lock);
+  bool succ = filesys_remove(file_n);
+  lock_release(&global_file_lock);
+  // TODO: set f->eax to succ
+}
+
+static void sys_open(struct intr_frame* f) {}
+
+static void filesize(struct intr_frame* f) {
+  int fd = intr_stack_arg(int, f->esp, 1);
   /* If the fd corresponds to input or output files we return 0
     as we don't have file objects for them */
   if (fd < FD_BEGIN)
@@ -159,13 +171,21 @@ int filesize(int fd) {
   if (file == NULL) { /* Return 0 if the file is NULL */
     return 0;
   }
+  lock_acquire(&global_file_lock);
   int length = file_length(file);
+  lock_release(&global_file_lock);
 
-  return length;
+  // TODO: set the f->eax to lenght
 }
 
 /* read: */
-int read(int fd, void* buffer, unsigned size) {
+static void sys_read(struct intr_frame* f) {
+  int fd = intr_stack_arg(int, f->esp, 1);
+  void* buffer = intr_stack_arg(void*, f->esp, 2);
+  unsigned size = intr_stack_arg(unsigned, f->esp, 3);
+
+  // TODO: validate user data of buffer with size
+
   if (buffer == NULL) {
     return -1; // Buffer is NULL so return -1
   }
@@ -188,10 +208,12 @@ int read(int fd, void* buffer, unsigned size) {
   if (file == NULL)
     return -1; // If no file is found with given fd return -1
 
+  lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
   int bytes_read = file_read_at(file, buffer, size, offset);
+  lock_release(&global_file_lock);
 
-  return bytes_read;
+  // TODO: set f->eax to be bytes_read
 }
 
 /* write: size number of bytes from buffer to fd */
