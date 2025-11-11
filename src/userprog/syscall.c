@@ -157,18 +157,6 @@ int read(int fd, void* buffer, unsigned size) {
 }
 
 /* write: size number of bytes from buffer to fd */
-<<<<<<< src/userprog/syscall.c
-// void sys_write(struct intr_frame* f) {
-//   if (buffer == NULL) {
-//     return 0;
-//   }
-//   if (fd == 1) {
-//     putbuf(buffer, size);
-//     return size;
-//   }
-//   return 0;
-// }
-=======
 int write(int fd, const void* buffer, unsigned size) {
   if (buffer == NULL) {
     return 0;
@@ -237,16 +225,9 @@ void close(int fd) {
   /* For any other case we close the file directly */
   process_close_file(fd);
 }
->>>>>>> src/userprog/syscall.c
 
 /* halt: terminates the entire OS by calling shutdown_power_off. */
 void sys_halt(struct intr_frame* f UNUSED) { shutdown_power_off(); }
 
 /* exit: terminates a user process by calling process_exit. */
 // void sys_exit(struct intr_frame* f) { process_exit(status); }
-
-<<<<<<< src/userprog/syscall.c
-// void sys_wait(struct intr_frame* f) { process_wait() }
-=======
-int wait(pid_t pid) { process_wait(); }
->>>>>>> src/userprog/syscall.c
