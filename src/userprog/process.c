@@ -205,7 +205,7 @@ static void start_process(void* args_) {
 
   char** argv = malloc(max(max_args, count_max_args) * sizeof(char*));
 
-  bool success;
+  bool success = true;
 
   if (argv == NULL) {
     success = false; // This needs to be some other error
