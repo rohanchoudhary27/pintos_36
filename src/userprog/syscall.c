@@ -159,7 +159,7 @@ static void sys_remove(struct intr_frame* f) {
 
 static void sys_open(struct intr_frame* f) {}
 
-static void filesize(struct intr_frame* f) {
+static void sys_filesize(struct intr_frame* f) {
   int fd = intr_stack_arg(int, f->esp, 1);
   /* If the fd corresponds to input or output files we return 0
     as we don't have file objects for them */
@@ -167,7 +167,7 @@ static void filesize(struct intr_frame* f) {
     return 0;
 
   /* For any other case return the size of the file */
-  struct file* file = process_get_file(fd);
+  struct file* file = sys_process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
     return 0;
   }
@@ -217,7 +217,7 @@ static void sys_read(struct intr_frame* f) {
 }
 
 /* write: size number of bytes from buffer to fd */
-int write(int fd, const void* buffer, unsigned size) {
+int sys_write(int fd, const void* buffer, unsigned size) {
   if (buffer == NULL) {
     return 0;
   }
@@ -245,7 +245,7 @@ int write(int fd, const void* buffer, unsigned size) {
 }
 
 /* seek: */
-void seek(int fd, unsigned position) {
+void sys_seek(int fd, unsigned position) {
   /* If the fd corresponds to input or output files we return
     as we don't have file objects for them */
   if (fd < FD_BEGIN)
@@ -259,7 +259,7 @@ void seek(int fd, unsigned position) {
   file_seek(file, position);
 }
 
-unsigned tell(int fd) {
+unsigned sys_tell(int fd) {
   /* If the fd corresponds to input or output files we return 0
      as we don't have file objects for them */
   if (fd < FD_BEGIN)
@@ -276,7 +276,7 @@ unsigned tell(int fd) {
   return offset;
 }
 
-void close(int fd) {
+void sys_close(int fd) {
   /* If the fd corresponds to input or output files we return
      as we can't close them */
   if (fd < FD_BEGIN)
@@ -285,11 +285,3 @@ void close(int fd) {
   /* For any other case we close the file directly */
   process_close_file(fd);
 }
-
-/* halt: terminates the entire OS by calling shutdown_power_off. */
-void halt(void) { shutdown_power_off(); }
-
-/* exit: terminates a user process by calling process_exit. */
-void exit(int status) { process_exit(status); }
-
-int wait(pid_t pid) { process_wait(pid); }
