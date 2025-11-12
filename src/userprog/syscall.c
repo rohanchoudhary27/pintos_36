@@ -27,7 +27,7 @@ static void* sys_remove(int argc, void* argv[]);
 static void* sys_open(int argc, void* argv[]);
 static void* filesize(int argc, void* argv[]);
 static void* sys_read(int argc, void* argv[]);
-int sys_write(int fd, const void* buffer, unsigned size);
+static void* sys_write(int argc, void* argv[]);
 void sys_seek(int fd, unsigned position);
 unsigned sys_tell(int fd);
 void sys_close(int fd);
@@ -263,13 +263,20 @@ static void* sys_read(int argc, void* argv[]) {
 }
 
 /* write: size number of bytes from buffer to fd */
-int sys_write(int fd, const void* buffer, unsigned size) {
+static void* sys_write(int argc, void* argv[]) {
+
+  int fd = (int)argv[0];
+  void* buffer = argv[1];
+  unsigned size = (unsigned)argv[2];
+
+  is_valid_udata(buffer, size);
+
   if (buffer == NULL) {
-    return NO_WRITE;
+    return (void*)(intptr_t)NO_WRITE;
   }
 
   if (fd == STDIN_FILENO) {
-    return NO_WRITE; // Can't write to input file so return 0
+    return (void*)(intptr_t)NO_WRITE; // Can't write to input file so return 0
   }
 
   if (fd == STDOUT_FILENO) {
@@ -279,22 +286,22 @@ int sys_write(int fd, const void* buffer, unsigned size) {
       putbuf((char*)buffer + i, BUFFER_WRITE_SIZE);
     }
     putbuf(buffer + i, size - i);
-    return size;
+    return (void*)(intptr_t)size;
   }
 
   /* Otherwise write to the file from the position specified
      in it's properties */
   struct file* file = process_get_file(fd);
-
   if (file == NULL)
-    return NO_WRITE; // If no file is found with given fd return 0
-
+    return (
+        void*)(intptr_t)NO_WRITE; // If no file is found with given fd return 0
   lock_acquire(&global_file_lock);
+
   unsigned offset = file_tell(file);
   int bytes_written = file_write_at(file, buffer, size, offset);
   lock_release(&global_file_lock);
 
-  return bytes_written;
+  return (void*)(intptr_t)bytes_written;
 }
 
 /* seek: */
