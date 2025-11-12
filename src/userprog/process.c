@@ -60,7 +60,7 @@ char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* save_ptr;
   char* token;
 
-  char* token = strtok_r(copy, " ", &save_ptr);
+  token = strtok_r(copy, " ", &save_ptr);
   int count = 0;
 
   for (token = strtok_r(copy, " ", &save_ptr); token != NULL;

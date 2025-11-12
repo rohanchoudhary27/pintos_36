@@ -721,12 +721,12 @@ thread_get_recent_cpu (void)
   return fixed_to_int (multfi (thread_current ()->recent_cpu, 100));
 }
 
-struct thread* thread_get_by_tid(tid) {
+struct thread* thread_get_by_tid(tid_t tid) {
   enum intr_level old_level = intr_disable();
   for (struct list_elem* e = list_begin(&all_list); e != list_end(&all_list);
        e = list_next(e)) {
     struct thread* t = list_entry(e, struct thread, allelem);
-    if (t->tid = tid) {
+    if (t->tid == tid) {
       intr_set_level(old_level);
       return t;
     }
