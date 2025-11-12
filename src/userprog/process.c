@@ -710,7 +710,8 @@ process_get_file(int fd)
 }
 
 /* Add a file to the current process and return the file
-   descriptor (fd) as a return value. */
+   descriptor (fd) as a return value. Returns -1 if
+   operation fails. */
 int
 process_add_file(struct file *f)
 {
@@ -721,7 +722,7 @@ process_add_file(struct file *f)
   struct file_desc* fd = malloc(sizeof *fd);
 
   if (fd == NULL)
-    return SYS_ERROR;
+    return -1;
 
   fd->fd = cur->next_fd++;
   fd->file = f;

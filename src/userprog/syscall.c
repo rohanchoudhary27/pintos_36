@@ -169,7 +169,28 @@ static void* sys_remove(int argc, void* argv[]) {
   return (void*)file_name;
 }
 
-static void* sys_open(int argc, void* argv[]) {}
+static void* sys_open(int argc, void* argv[]) {
+  const char* file_name = (const char*)argv[0];
+  is_valid_udata(file_name, READDIR_MAX_LEN);
+
+  /* Open file in file system. */
+  lock_acquire(&global_file_lock);
+  struct file* file = filesys_open(file_name);
+  lock_release(&global_file_lock);
+
+  /* Check if file could not be opened. */
+  if (file == NULL)
+    return SYS_ERROR;
+
+  /* process_add_file returns -1 if operation didn't work and closes file */
+  int pd = process_add_file(file);
+
+  if (pd == -1) {
+    return SYS_ERROR;
+  }
+
+  return pd;
+}
 
 static void* filesize(int argc, void* argv[]) {
   int fd = (int)argv[0];
