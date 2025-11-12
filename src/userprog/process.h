@@ -1,6 +1,7 @@
 #ifndef USERPROG_PROCESS_H
 #define USERPROG_PROCESS_H
 
+#include "lib/kernel/hash.h"
 #include "threads/thread.h"
 
 #define PROC_SUCC (0)  /* Exit code for normal process termination. */
@@ -13,6 +14,8 @@
 /* file descriptor values that corresponds to input and output files */
 #define INPUT_FILE_FD (0)
 #define OUTPUT_FILE_FD (1)
+
+typedef int pid_t;
 
 /* File descriptor to file pairs struct that can be added to lists */
 struct file_desc {
@@ -29,16 +32,17 @@ struct process {
   struct list fd_table;       /* List that contains fd file pairs */
   uint32_t next_fd;           /* The next file descriptor value */
   struct process* parent;     /* Parent of the process. */
-  struct list children;       /* List of child_process. */
+  struct hash children;       /* List of child_process. */
   int exit_status;            /* Current exit status of the process. */
 };
 
 struct child_process {
-  tid_t tid;       /*The tid of the child. */
+  pid_t pid;       /*The tid of the child. */
   int exit_status; /* Exit status of child. */
   bool has_exited; /* Flag for whether child process has exited. */
   struct semaphore wait_sema;
-  struct list elem;
+  struct lock exit_lock;
+  struct hash_elem elem;
 };
 
 void root_process_init(void);
