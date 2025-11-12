@@ -28,7 +28,7 @@ static void* sys_open(int argc, void* argv[]);
 static void* filesize(int argc, void* argv[]);
 static void* sys_read(int argc, void* argv[]);
 static void* sys_write(int argc, void* argv[]);
-void sys_seek(int fd, unsigned position);
+static void* sys_seek(int argc, void* argv[]);
 unsigned sys_tell(int fd);
 void sys_close(int fd);
 
@@ -327,24 +327,27 @@ static void* sys_seek(int argc, void* argv[]) {
   return NULL;
 }
 
-unsigned sys_tell(int fd) {
+static void* sys_tell(int argc, void* argv[]) {
   /* If the fd corresponds to input or output files we return 0
      as we don't have file objects for them */
+
+  int fd = (int)argv[0];
+
   if (fd < FD_BEGIN)
-    return SYS_TELL_NOT_FOUND;
+    return (void*)(unsigned)SYS_TELL_NOT_FOUND;
 
   /* For any other case return the position property of the
      file object */
   struct file* file = process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
-    return SYS_TELL_NOT_FOUND;
+    return (void*)(unsigned)SYS_TELL_NOT_FOUND;
   }
 
   lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
   lock_release(&global_file_lock);
 
-  return offset;
+  return (void*)(unsigned)offset;
 }
 
 void sys_close(int fd) {
