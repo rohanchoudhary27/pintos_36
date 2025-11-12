@@ -23,6 +23,22 @@ static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+/* Hash calculation function for child processes hashmap. */
+static unsigned hash_child_process(const struct hash_elem* e,
+                                   void* aux UNUSED) {
+  struct child_process* child = hash_entry(e, struct child_process, elem);
+  return hash_int(child->pid);
+}
+
+/* Comparison function for child processes hashmap. */
+static bool hash_less_child_process(const struct hash_elem* a,
+                                    const struct hash_elem* b,
+                                    void* aux UNUSED) {
+  struct child_process* child_a = hash_entry(a, struct child_process, elem);
+  struct child_process* child_b = hash_entry(b, struct child_process, elem);
+  return (child_a->pid < child_b->pid);
+}
+
 /* Initialises the main thread as a minimal root OS process.
    Note that when this thread/process terminates, the OS will shutdown. */
 void
@@ -44,7 +60,7 @@ char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* save_ptr;
   char* token;
 
-  char* token = strtok_r(copy, " ", &save_ptr);
+  token = strtok_r(copy, " ", &save_ptr);
   int count = 0;
 
   for (token = strtok_r(copy, " ", &save_ptr); token != NULL;
@@ -91,11 +107,11 @@ process_execute (const char *cmd_line)
   }
 
   struct child_process* child_p;
-  child_p->tid = tid;
+  child_p->pid = (pid_t)tid;
   child_p->exit_status = PROC_ERR;
   child_p->has_exited = false;
   sema_init(&child_p->wait_sema, 0);
-  list_push_back(&cur->process->children, &child_p->elem);
+  hash_insert(&cur->process->children, &child_p->elem);
 
   struct thread* child_thread = thread_get_by_tid(tid);
   if (child_thread == NULL && child_thread->process != NULL) {
@@ -118,7 +134,8 @@ process_init (struct thread *t)
   process->pagedir = NULL;
   process->thread = t;
   process->parent = NULL;
-  list_init(&process->children);
+  hash_init(&process->children, hash_child_process, hash_less_child_process,
+            NULL);
   process->exit_status = PROC_ERR;
   list_init(&process->fd_table);
   process->next_fd = FD_BEGIN;
@@ -226,9 +243,30 @@ static void start_process(void* args_) {
  * This function will be implemented in task 2.
  * For now, it does nothing. */
 int process_wait(tid_t child_tid UNUSED) {
-  while (true) {
-  }
-  return PROC_ERR;
+  // Look up child in current process's children hash
+  struct child_process mock_child;
+  mock_child.pid = (pid_t)child_tid;
+  struct hash_elem* e =
+      hash_find(&thread_current()->process->children, &mock_child.elem);
+  if (e == NULL)
+    return -1; // Invalid or non-child PID
+
+  struct child_process* child_process =
+      hash_entry(e, struct child_process, elem);
+
+  // Wait until child finishes execution (set by sema_up in process_exit)
+  sema_down(&child_process->wait_sema);
+
+  // Synchronize with child's exit (ensures exit_status is ready)
+  lock_acquire(&child_process->exit_lock);
+  lock_release(&child_process->exit_lock);
+
+  // Retrieve and clean up child info
+  int exit_status = child_process->exit_status;
+  hash_delete(&thread_current()->process->children, &child_process->elem);
+  free(child_process);
+
+  return exit_status; // Return child’s exit code to parent
 }
 
 /* Free the current process's resources and then exit the underlying thread. */
@@ -262,19 +300,24 @@ process_exit (int exit_code UNUSED)
 
       /* Allow access to the current process's executable file if
          the process is exit */
-      file = cur->file;
-      if (file != NULL) {
-        /* Don't have to file allow write as file close does that
-           but left it to be explicit about intent */
-        file_allow_write(file); 
-        file_close(file);
-        cur->file = NULL;
-      }
+        file = cur->executable;
+        if (file != NULL) {
+          lock_acquire(&global_file_lock);
+          /* Don't have to file allow write as file close does that
+             but left it to be explicit about intent */
+          file_allow_write(file);
+          file_close(file);
+          lock_release(&global_file_lock);
+          cur->executable = NULL;
+        }
   
       /* Finally, destroy the current process's struct */
-        printf("<%s>: exit(%d)\n", thread_current()->name, exit_code);
-        thread_current()->process = NULL;
-        free(cur);
+      printf("<%s>: exit(%d)\n", thread_current()->name, exit_code);
+      thread_current()->process = NULL;
+      free(cur);
+
+      // TODO: do hash_destroy() also implement a way to destroy the
+      // child_processes
     }
     
   /* Now terminate the thread underlying this process. */
@@ -395,18 +438,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
-  cur->file = file;
-  file_deny_write(file);
+    cur->executable = file;
+    file_deny_write(file);
 
-  /* Read and verify executable header. */
-  if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
-      || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
-      || ehdr.e_type != 2
-      || ehdr.e_machine != 3
-      || ehdr.e_version != 1
-      || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
-      || ehdr.e_phnum > 1024) 
-    {
+    /* Read and verify executable header. */
+    if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
+        memcmp(ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 ||
+        ehdr.e_machine != 3 || ehdr.e_version != 1 ||
+        ehdr.e_phentsize != sizeof(struct Elf32_Phdr) || ehdr.e_phnum > 1024) {
       printf ("load: %s: error loading executable\n", file_name);
       goto done; 
     }
@@ -487,7 +526,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     if (file != NULL) {
       file_close (file);
     }
-    cur->file = NULL;
+    cur->executable = NULL;
   }
   return success;
 }

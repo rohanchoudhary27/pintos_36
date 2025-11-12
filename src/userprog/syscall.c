@@ -24,8 +24,6 @@ static void is_valid_uaddr(const void*);
 static void exit_and_set_process_status(int);
 static void* get_syscall_arg_addr(void*, int);
 
-struct lock global_file_lock;
-
 struct syscall_descriptor {
   int argc;
   int is_return_void;
@@ -178,12 +176,12 @@ static void* filesize(int argc, void* argv[]) {
   /* If the fd corresponds to input or output files we return 0
     as we don't have file objects for them */
   if (fd < FD_BEGIN)
-    return 0;
+    return SYS_ERROR;
 
   /* For any other case return the size of the file */
   struct file* file = process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
-    return 0;
+    return SYS_ERROR;
   }
   lock_acquire(&global_file_lock);
   int length = file_length(file);
@@ -200,11 +198,11 @@ static void* sys_read(int argc, void* argv[]) {
   is_valid_udata(buffer, size);
 
   if (buffer == NULL) {
-    return -1; // Buffer is NULL so return -1
+    return SYS_ERROR; // Buffer is NULL so return -1
   }
 
   if (fd == OUTPUT_FILE_FD) {
-    return -1; // Can't read from output file so return -1
+    return SYS_ERROR; // Can't read from output file so return -1
   }
 
   if (fd == INPUT_FILE_FD) {
@@ -219,7 +217,7 @@ static void* sys_read(int argc, void* argv[]) {
   struct file* file = process_get_file(fd);
 
   if (file == NULL)
-    return -1; // If no file is found with given fd return -1
+    return SYS_ERROR; // If no file is found with given fd return -1
 
   lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
@@ -230,17 +228,22 @@ static void* sys_read(int argc, void* argv[]) {
 }
 
 /* write: size number of bytes from buffer to fd */
-int write(int fd, const void* buffer, unsigned size) {
+int sys_write(int fd, const void* buffer, unsigned size) {
   if (buffer == NULL) {
-    return 0;
+    return NO_WRITE;
   }
 
   if (fd == INPUT_FILE_FD) {
-    return 0; // Can't write to input file so return 0
+    return NO_WRITE; // Can't write to input file so return 0
   }
 
   if (fd == OUTPUT_FILE_FD) {
-    putbuf(buffer, size);
+    /* Write to console, BUFFER_WRITE_SIZE chars at a time. */
+    unsigned i;
+    for (i = 0; i + BUFFER_WRITE_SIZE <= size; i += BUFFER_WRITE_SIZE) {
+      putbuf((char*)buffer + i, BUFFER_WRITE_SIZE);
+    }
+    putbuf(buffer + i, size - i);
     return size;
   }
 
@@ -249,7 +252,7 @@ int write(int fd, const void* buffer, unsigned size) {
   struct file* file = process_get_file(fd);
 
   if (file == NULL)
-    return 0; // If no file is found with given fd return -1
+    return NO_WRITE; // If no file is found with given fd return 0
 
   unsigned offset = file_tell(file);
   int bytes_written = file_write_at(file, buffer, size, offset);
@@ -258,7 +261,7 @@ int write(int fd, const void* buffer, unsigned size) {
 }
 
 /* seek: */
-void seek(int fd, unsigned position) {
+void sys_seek(int fd, unsigned position) {
   /* If the fd corresponds to input or output files we return
     as we don't have file objects for them */
   if (fd < FD_BEGIN)
@@ -266,30 +269,30 @@ void seek(int fd, unsigned position) {
 
   /* For any other case set the position on files */
   struct file* file = process_get_file(fd);
-  if (file == NULL) { /* Return 0 if the file is NULL */
-    return 0;
+  if (file == NULL) { /* Return if the file is NULL */
+    return;
   }
   file_seek(file, position);
 }
 
-unsigned tell(int fd) {
+unsigned sys_tell(int fd) {
   /* If the fd corresponds to input or output files we return 0
      as we don't have file objects for them */
   if (fd < FD_BEGIN)
-    return 0;
+    return SYS_TELL_NOT_FOUND;
 
   /* For any other case return the position property of the
      file object */
   struct file* file = process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
-    return 0;
+    return SYS_TELL_NOT_FOUND;
   }
   unsigned offset = file_tell(file);
 
   return offset;
 }
 
-void close(int fd) {
+void sys_close(int fd) {
   /* If the fd corresponds to input or output files we return
      as we can't close them */
   if (fd < FD_BEGIN)
@@ -298,4 +301,3 @@ void close(int fd) {
   /* For any other case we close the file directly */
   process_close_file(fd);
 }
-

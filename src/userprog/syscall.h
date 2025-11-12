@@ -8,6 +8,8 @@
 
 typedef void* (*syscall_f)(int argc, void* argv);
 
+struct lock global_file_lock;
+
 void syscall_init(void);
 
 #endif /* userprog/syscall.h */
