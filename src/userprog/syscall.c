@@ -305,21 +305,26 @@ static void* sys_write(int argc, void* argv[]) {
 }
 
 /* seek: */
-void sys_seek(int fd, unsigned position) {
+static void* sys_seek(int argc, void* argv[]) {
   /* If the fd corresponds to input or output files we return
     as we don't have file objects for them */
+
+  int fd = (int)argv[0];
+  unsigned pos = (unsigned)argv[1];
+
   if (fd < FD_BEGIN)
-    return;
+    return NULL;
 
   /* For any other case set the position on files */
   struct file* file = process_get_file(fd);
   if (file == NULL) { /* Return if the file is NULL */
-    return;
+    return NULL;
   }
 
   lock_acquire(&global_file_lock);
-  file_seek(file, position);
+  file_seek(file, pos);
   lock_release(&global_file_lock);
+  return NULL;
 }
 
 unsigned sys_tell(int fd) {
