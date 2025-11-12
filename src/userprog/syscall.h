@@ -14,6 +14,21 @@
 
 typedef void(syscall)(struct intr_frame*);
 
+/* The value next_fd begins at. Needed to reserve some fd's
+   for input and output file */
+#define FD_BEGIN (2)
+
+/* file descriptor values that corresponds to input and output files */
+#define STDIN_FILENO (0)
+#define STDOUT_FILENO (1)
+
+/* File descriptor to file pairs struct that can be added to lists */
+struct file_desc {
+  int fd;
+  struct file* file;
+  struct hash_elem elem;
+};
+
 struct lock global_file_lock;
 
 void syscall_init(void);

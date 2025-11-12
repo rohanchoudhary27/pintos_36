@@ -188,13 +188,13 @@ static void sys_read(struct intr_frame* f) {
     return SYS_ERROR; // Buffer is NULL so return -1
   }
 
-  if (fd == OUTPUT_FILE_FD) {
+  if (fd == STDOUT_FILENO) {
     return SYS_ERROR; // Can't read from output file so return -1
   }
 
-  if (fd == INPUT_FILE_FD) {
+  if (fd == STDIN_FILENO) {
     for (uint32_t i = 0; i < size; i++) {
-      ((uint8_t*)buffer)[i] = input_getc();
+      ((char*)buffer)[i] = input_getc();
     }
     return size;
   }
@@ -220,11 +220,11 @@ int sys_write(int fd, const void* buffer, unsigned size) {
     return NO_WRITE;
   }
 
-  if (fd == INPUT_FILE_FD) {
+  if (fd == STDIN_FILENO) {
     return NO_WRITE; // Can't write to input file so return 0
   }
 
-  if (fd == OUTPUT_FILE_FD) {
+  if (fd == STDOUT_FILENO) {
     /* Write to console, BUFFER_WRITE_SIZE chars at a time. */
     unsigned i;
     for (i = 0; i + BUFFER_WRITE_SIZE <= size; i += BUFFER_WRITE_SIZE) {
@@ -241,8 +241,10 @@ int sys_write(int fd, const void* buffer, unsigned size) {
   if (file == NULL)
     return NO_WRITE; // If no file is found with given fd return 0
 
+  lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
   int bytes_written = file_write_at(file, buffer, size, offset);
+  lock_release(&global_file_lock);
 
   return bytes_written;
 }
@@ -259,7 +261,10 @@ void sys_seek(int fd, unsigned position) {
   if (file == NULL) { /* Return if the file is NULL */
     return;
   }
+
+  lock_acquire(&global_file_lock);
   file_seek(file, position);
+  lock_release(&global_file_lock);
 }
 
 unsigned sys_tell(int fd) {
@@ -274,7 +279,10 @@ unsigned sys_tell(int fd) {
   if (file == NULL) { /* Return 0 if the file is NULL */
     return SYS_TELL_NOT_FOUND;
   }
+
+  lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
+  lock_release(&global_file_lock);
 
   return offset;
 }

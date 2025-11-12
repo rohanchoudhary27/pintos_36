@@ -39,6 +39,20 @@ static bool hash_less_child_process(const struct hash_elem* a,
   return (child_a->pid < child_b->pid);
 }
 
+/* Hash calculation function for file descriptions' hashmap. */
+static unsigned hash_fd_table(const struct hash_elem* e, void* aux UNUSED) {
+  struct file_desc* file_desc = hash_entry(e, struct file_desc, elem);
+  return hash_int(file_desc->fd);
+}
+
+/* Comparison function for file descriptions' hashmap. */
+static bool hash_less_fd_table(const struct hash_elem* a,
+                               const struct hash_elem* b, void* aux UNUSED) {
+  struct file_desc* file_desc_a = hash_entry(a, struct file_desc, elem);
+  struct file_desc* file_desc_b = hash_entry(b, struct file_desc, elem);
+  return (file_desc_a->fd < file_desc_b->fd);
+}
+
 /* Initialises the main thread as a minimal root OS process.
    Note that when this thread/process terminates, the OS will shutdown. */
 void
@@ -137,7 +151,7 @@ process_init (struct thread *t)
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
   process->exit_status = PROC_ERR;
-  list_init(&process->fd_table);
+  hash_init(&process->fd_table, hash_fd_table, hash_less_fd_table, NULL);
   process->next_fd = FD_BEGIN;
 
   /* Link thread to its process. */
@@ -683,16 +697,16 @@ install_page (void *upage, void *kpage, bool writable)
 struct file *
 process_get_file(int fd)
 {
-    struct process *cur = thread_current ()->process;
-    struct list_elem *e;
+  struct process* cur = thread_current()->process;
+  struct file_desc key;
+  key.fd = fd;
 
-    for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
-    {
-        struct file_desc *f = list_entry(e, struct file_desc, elem);
-        if (f->fd == fd)
-            return f->file;
-    }
+  struct hash_elem* e = hash_find(&cur->fd_table, &key.elem);
+  if (e == NULL)
     return NULL;
+
+  struct file_desc* f = hash_entry(e, struct file_desc, elem);
+  return f->file;
 }
 
 /* Add a file to the current process and return the file
@@ -700,21 +714,19 @@ process_get_file(int fd)
 int
 process_add_file(struct file *f)
 {
-    if (f == NULL)
-        return -1;
+  if (f == NULL)
+    return -1;
 
-    struct process *cur = thread_current ()->process;
-    struct file_desc *fd = malloc(sizeof *fd);
-    if (fd == NULL)
-    {
-        file_close(f);
-        return -1;
-    }
+  struct process* cur = thread_current()->process;
+  struct file_desc* fd = malloc(sizeof *fd);
 
-    fd->fd = cur->next_fd++;
-    fd->file = f;
-    list_push_back(&cur->fd_table, &fd->elem);
-    return fd->fd;
+  if (fd == NULL)
+    return SYS_ERROR;
+
+  fd->fd = cur->next_fd++;
+  fd->file = f;
+  hash_insert(&cur->fd_table, &fd->elem);
+  return fd->fd;
 }
 
 /* Removes a file from the current process. */
@@ -722,34 +734,45 @@ void
 process_close_file(int fd)
 {
   if (fd == NULL)
-      return;
+    return;
 
   struct process *cur = thread_current ()->process;
-  struct list_elem *e;
+  struct file_desc key;
+  key.fd = fd;
 
-  for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
-  {
-      struct file_desc *f = list_entry(e, struct file_desc, elem);
-      if (f->fd == fd) {
-        file_close(f->file);
-        free(f);
-        return;
-      }
-  }
+  struct hash_elem* e = hash_find(&cur->fd_table, &key.elem);
+  if (e == NULL)
+    return;
+
+  struct file_desc* f = hash_entry(e, struct file_desc, elem);
+  hash_delete(&cur->fd_table, &f->elem);
+  lock_acquire(&global_file_lock);
+  file_close(f->file);
+  lock_release(&global_file_lock);
+  free(f);
 }
 
 /* Close all of the open files the current process has. */
 void
 process_close_all_files(void)
 {
-    struct process *cur = thread_current ()->process;
-    struct list_elem *e = list_begin(&cur->fd_table);
+  struct process* cur = thread_current()->process;
 
-    while (e != list_end(&cur->fd_table))
-    {
-        struct file_desc *f = list_entry(e, struct file_desc, elem);
-        e = list_remove(&f->elem);
-        file_close(f->file);
-        free(f);
-    }
+  /* Either iterate and delete or just destroy with a destructor. */
+  struct hash_iterator it;
+  hash_first(&it, &cur->fd_table);
+  while (hash_cur(&it) != NULL) {
+    struct hash_elem* e = hash_cur(&it);
+    struct file_desc* f = hash_entry(e, struct file_desc, elem);
+
+    /* Move iterator before we delete. */
+    hash_next(&it);
+    hash_delete(&cur->fd_table, &f->elem);
+
+    lock_acquire(&global_file_lock);
+    file_close(f->file);
+    lock_release(&global_file_lock);
+
+    free(f);
+  }
 }
