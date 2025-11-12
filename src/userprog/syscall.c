@@ -164,12 +164,12 @@ static void sys_filesize(struct intr_frame* f) {
   /* If the fd corresponds to input or output files we return 0
     as we don't have file objects for them */
   if (fd < FD_BEGIN)
-    return 0;
+    return SYS_ERROR;
 
   /* For any other case return the size of the file */
   struct file* file = sys_process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
-    return 0;
+    return SYS_ERROR;
   }
   lock_acquire(&global_file_lock);
   int length = file_length(file);
@@ -187,11 +187,11 @@ static void sys_read(struct intr_frame* f) {
   // TODO: validate user data of buffer with size
 
   if (buffer == NULL) {
-    return -1; // Buffer is NULL so return -1
+    return SYS_ERROR; // Buffer is NULL so return -1
   }
 
   if (fd == OUTPUT_FILE_FD) {
-    return -1; // Can't read from output file so return -1
+    return SYS_ERROR; // Can't read from output file so return -1
   }
 
   if (fd == INPUT_FILE_FD) {
@@ -206,7 +206,7 @@ static void sys_read(struct intr_frame* f) {
   struct file* file = process_get_file(fd);
 
   if (file == NULL)
-    return -1; // If no file is found with given fd return -1
+    return SYS_ERROR; // If no file is found with given fd return -1
 
   lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
@@ -219,11 +219,11 @@ static void sys_read(struct intr_frame* f) {
 /* write: size number of bytes from buffer to fd */
 int sys_write(int fd, const void* buffer, unsigned size) {
   if (buffer == NULL) {
-    return 0;
+    return NO_WRITE;
   }
 
   if (fd == INPUT_FILE_FD) {
-    return 0; // Can't write to input file so return 0
+    return NO_WRITE; // Can't write to input file so return 0
   }
 
   if (fd == OUTPUT_FILE_FD) {
@@ -236,7 +236,7 @@ int sys_write(int fd, const void* buffer, unsigned size) {
   struct file* file = process_get_file(fd);
 
   if (file == NULL)
-    return 0; // If no file is found with given fd return -1
+    return NO_WRITE; // If no file is found with given fd return 0
 
   unsigned offset = file_tell(file);
   int bytes_written = file_write_at(file, buffer, size, offset);
@@ -253,8 +253,8 @@ void sys_seek(int fd, unsigned position) {
 
   /* For any other case set the position on files */
   struct file* file = process_get_file(fd);
-  if (file == NULL) { /* Return 0 if the file is NULL */
-    return 0;
+  if (file == NULL) { /* Return if the file is NULL */
+    return;
   }
   file_seek(file, position);
 }
@@ -263,13 +263,13 @@ unsigned sys_tell(int fd) {
   /* If the fd corresponds to input or output files we return 0
      as we don't have file objects for them */
   if (fd < FD_BEGIN)
-    return 0;
+    return SYS_TELL_NOT_FOUND;
 
   /* For any other case return the position property of the
      file object */
   struct file* file = process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
-    return 0;
+    return SYS_TELL_NOT_FOUND;
   }
   unsigned offset = file_tell(file);
 
