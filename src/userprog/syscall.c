@@ -1,11 +1,12 @@
 #include "userprog/syscall.h"
-#include "devices/shutdown.h"
 #include "devices/input.h"
+#include "devices/shutdown.h"
+#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "filesys/filesys.h"
+#include "user/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 
@@ -19,7 +20,7 @@
 
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
-static void kill_process_if_user_addr_invalid(const void*);
+static void is_valid_uaddr(const void*);
 static void exit_and_set_process_status(int);
 static void* get_syscall_arg_addr(void*, int);
 
@@ -68,7 +69,7 @@ static void syscall_handler(struct intr_frame* f) {
    address is invalid, i.e., address is in the user space, not null, and is
    mapped. */
 static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
-  kill_process_if_user_data_invalid(f->esp, 32);
+  is_valid_udata(f->esp, 32);
   uint32_t* esp = (uint32_t*)f->esp;
   uint32_t syscall_no = *esp;
   return syscall_no;
@@ -77,20 +78,19 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
 // TODO: implement buffer/string check as well. The lecture recording
 // suggests that you first check the buffer start address, if it's good,
 // check its end address as well.
-static void kill_process_if_user_addr_invalid(const void* addr) {
+static void is_valid_uaddr(const void* addr) {
   void* phy_addr = pagedir_get_page(thread_current()->process->pagedir, addr);
   if (addr == NULL || !is_user_vaddr(addr) || phy_addr == NULL) {
     exit_and_set_process_status(PROC_ERR);
   }
 }
 
-static void kill_process_if_user_data_invalid(const void* data_addr,
-                                              unsigned size) {
+static void is_valid_udata(const void* data_addr, unsigned size) {
   uintptr_t addrptr = (uintptr_t)data_addr;
   uintptr_t endptr = addrptr + size;
   uintptr_t pg_boundry = (uintptr_t)pg_round_down(data_addr);
   while (addrptr < endptr) {
-    kill_process_if_user_addr_invalid((void*)addrptr);
+    is_valid_uaddr((void*)addrptr);
     pg_boundry += PGSIZE;
     if (pg_boundry < endptr)
       addrptr = pg_boundry;
@@ -102,8 +102,6 @@ static void kill_process_if_user_data_invalid(const void* data_addr,
 /* Exits the current process with the provided status code. Before exiting, it
    sets the process exit_status to status. */
 static void exit_and_set_process_status(int status) {
-  // FIXME: check status and check thread current if it is null or if the
-  // process is null
   struct thread* curr_thread = thread_current();
   ASSERT(curr_thread->process != NULL);
 
@@ -118,7 +116,7 @@ static void exit_and_set_process_status(int status) {
    index. Kills the process if the argument address is invalid. */
 static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
   void* arg_addr = ((int*)f_esp) + 1 + (arg_ind);
-  kill_process_if_user_addr_invalid(arg_addr);
+  is_valid_uaddr(arg_addr);
   return arg_addr;
 }
 
@@ -142,12 +140,12 @@ static void* sys_exit(int argc, void* argv[]) {
 
 static void* sys_exec(int argc, void* argv[]) {
   const char* cmd_line = (const char*)argv[0];
+  is_valid_udata(cmd_line, PGSIZE);
   tid_t proc_res = process_execute(cmd_line);
   return (void*)proc_res;
 }
 
 static void* sys_wait(int argc, void* argv[]) {
-  // TODO: validate the thing
   tid_t pid = (tid_t)argv[0];
   int res = process_wait(pid);
   return (void*)res;
@@ -156,6 +154,7 @@ static void* sys_wait(int argc, void* argv[]) {
 static void* sys_create(int argc, void* argv[]) {
   const char* file = (const char*)argv[0];
   unsigned initial_size = (unsigned)argv[1];
+  is_valid_udata(file, READDIR_MAX_LEN);
   lock_acquire(&global_file_lock);
   bool succ = filesys_create (file, initial_size);
   lock_release(&global_file_lock);
@@ -164,7 +163,7 @@ static void* sys_create(int argc, void* argv[]) {
 
 static void* sys_remove(int argc, void* argv[]) {
   const char* file_name = (const char*)argv[0];
-  // TODO: validate the data
+  is_valid_udata(file_name, READDIR_MAX_LEN);
   lock_acquire(&global_file_lock);
   bool succ = filesys_remove(file_name);
   lock_release(&global_file_lock);
@@ -198,7 +197,7 @@ static void* sys_read(int argc, void* argv[]) {
   void* buffer = argv[1];
   unsigned size = (unsigned)argv[2];
 
-  // TODO: validate user data of buffer with size
+  is_valid_udata(buffer, size);
 
   if (buffer == NULL) {
     return -1; // Buffer is NULL so return -1
