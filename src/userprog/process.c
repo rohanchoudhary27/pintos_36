@@ -19,6 +19,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define BYTE_SIZE 4
+
 static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -192,16 +194,32 @@ static bool push_arguments(void** esp, char** argv, int argc) {
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* args_) {
-  // char* argv = malloc(PGSIZE / sizeof(char*));
-  int argc = 0;
-  char** argv = parse_cmd_line(args_, &argc);
-  struct thread *cur = thread_current ();
-  char *file_name = args_;
-  struct intr_frame if_;
+
+  // size of stack to check for overflow
+  size_t size_stack = BYTE_SIZE * sizeof(void*);
+
+  size_t max_args = (strlen(args_) + 1) / 2;
+
+  size_t count_max_args =
+      (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
+
+  char** argv = malloc(max(max_args, count_max_args) * sizeof(char*));
+
   bool success;
-  
-  /* Initialise process. */
-  success = process_init (cur);
+
+  if (argv == NULL) {
+    success = false; // This needs to be some other error
+  }
+
+  int argc = 0;
+  char* file_name = args_;
+  argv = parse_cmd_line(args_, &argc);
+  struct thread* cur = thread_current();
+  struct intr_frame if_;
+
+  if (success) {
+    success = process_init(cur);
+  }
 
   if (success)
     {
@@ -214,11 +232,17 @@ static void start_process(void* args_) {
       if (success) {
         success = push_arguments(&if_.esp, argv, argc);
       }
-    }
+  }
+  size_stack = (size_stack + (BYTE_SIZE - 1)) &
+               ~(BYTE_SIZE - 1) + (argc * (int)sizeof(char*));
+
+  if (size_stack > PGSIZE || argv[argc]) {
+    success = false;
+  }
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
   palloc_free_page (file_name);
-  
+  free(argv);
   /* If load failed, terminate the process. */
   if (!success) 
     process_exit (PROC_ERR);
