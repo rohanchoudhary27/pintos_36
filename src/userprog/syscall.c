@@ -29,8 +29,8 @@ static void* filesize(int argc, void* argv[]);
 static void* sys_read(int argc, void* argv[]);
 static void* sys_write(int argc, void* argv[]);
 static void* sys_seek(int argc, void* argv[]);
-unsigned sys_tell(int fd);
-void sys_close(int fd);
+static void* sys_tell(int argc, void* argv[]);
+static void* sys_close(int argc, void* argv[]);
 
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
@@ -350,12 +350,15 @@ static void* sys_tell(int argc, void* argv[]) {
   return (void*)(unsigned)offset;
 }
 
-void sys_close(int fd) {
+static void* sys_close(int argc, void* argv[]) {
   /* If the fd corresponds to input or output files we return
      as we can't close them */
+
+  int fd = (int)argv[0];
   if (fd < FD_BEGIN)
-    return;
+    return NULL;
 
   /* For any other case we close the file directly */
   process_close_file(fd);
+  return NULL;
 }
