@@ -2,6 +2,7 @@
 #define USERPROG_PROCESS_H
 
 #include "lib/kernel/hash.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 
 #define PROC_SUCC (0)  /* Exit code for normal process termination. */
@@ -34,6 +35,9 @@ struct process {
   struct process* parent;     /* Parent of the process. */
   struct hash children;       /* List of child_process. */
   int exit_status;            /* Current exit status of the process. */
+  struct lock process_lock;   /* Per process lock. */
+  struct semaphore wait_sema; /* Semaphore for the children processes the
+                                 process is waiting for. */
 };
 
 struct child_process {
