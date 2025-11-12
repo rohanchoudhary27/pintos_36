@@ -227,7 +227,12 @@ int sys_write(int fd, const void* buffer, unsigned size) {
   }
 
   if (fd == OUTPUT_FILE_FD) {
-    putbuf(buffer, size);
+    /* Write to console, BUFFER_WRITE_SIZE chars at a time. */
+    unsigned i;
+    for (i = 0; i + BUFFER_WRITE_SIZE <= size; i += BUFFER_WRITE_SIZE) {
+      putbuf((char*)buffer + i, BUFFER_WRITE_SIZE);
+    }
+    putbuf(buffer + i, size - i);
     return size;
   }
 

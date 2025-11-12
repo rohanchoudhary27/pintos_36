@@ -6,6 +6,8 @@
 #include "threads/interrupt.h"
 #include "process.h"
 
+#define BUFFER_WRITE_SIZE (150)
+
 #define SYS_ERROR (-1)
 #define NO_WRITE (0)
 #define SYS_TELL_NOT_FOUND (0)
