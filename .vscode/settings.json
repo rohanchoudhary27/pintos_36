@@ -7,7 +7,16 @@
       "interrupt.h": "c",
       "stdbool.h": "c",
       "syscall-nr.h": "c",
-      "inttypes.h": "c"
+      "inttypes.h": "c",
+      "array": "c",
+      "charconv": "c",
+      "compare": "c",
+      "ostream": "c",
+      "ranges": "c",
+      "tuple": "c",
+      "type_traits": "c",
+      "utility": "c",
+      "limits": "c"
     },
     "C_Cpp.default.defines": [
 		  "USERPROG"

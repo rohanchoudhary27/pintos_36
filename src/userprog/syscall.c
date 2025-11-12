@@ -16,7 +16,6 @@
 #include <syscall-nr.h>
 
 #define SYSCALL_NUMBER_BITS 32
-#define NUMBER_OF_SYSCALLS 20
 
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
@@ -26,13 +25,18 @@ static void* get_syscall_arg_addr(void*, int);
 
 struct lock global_file_lock;
 
-// char *addr = *((char *) get_syscall_arg_addr(esp, 1));
-#define intr_stack_arg(type, esp, ind) *((type*)get_syscall_arg_addr(esp, ind));
+struct syscall_descriptor {
+  int argc;
+  int is_return_void;
+  syscall_f sys_func;
+};
 
 /* For now, let's store the table as an array with indices representing
     syscall numbers, and the value being the function pointer. Maybe we
     can in the future turn this into hashmap. */
-static syscall* syscall_map[] = {sys_halt};
+static struct syscall_descriptor syscall_map[] = {
+    [SYS_HALT] = {
+        .argc = 0, .is_return_void = 1, .sys_func = (syscall_f)sys_halt}};
 
 void syscall_init(void) {
   lock_init(&global_file_lock);
@@ -45,7 +49,19 @@ static void syscall_handler(struct intr_frame* f) {
   if (syscall_no < num_syscall_funcs || syscall_no >= num_syscall_funcs) {
     exit_and_set_process_status(PROC_ERR);
   }
-  syscall_map[syscall_no](f);
+
+  struct syscall_descriptor sys_info = syscall_map[syscall_no];
+  void* argv[sys_info.argc];
+  for (int i = 0; i < sys_info.argc; i++) {
+    argv[i] = get_syscall_arg_addr(f->esp, i);
+  }
+
+  if (sys_info.is_return_void)
+    sys_info.sys_func(sys_info.argc, argv);
+  else {
+    uint32_t feax = (uint32_t)sys_info.sys_func(sys_info.argc, argv);
+    f->eax = feax;
+  }
 }
 
 /* Gets syscall number from the interrupt frame, and kills the process if the
@@ -101,7 +117,7 @@ static void exit_and_set_process_status(int status) {
    stack pointer. Calculates the memory address based on the esp and argument
    index. Kills the process if the argument address is invalid. */
 static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
-  void* arg_addr = f_esp + 1 + (arg_ind - 1);
+  void* arg_addr = ((int*)f_esp) + 1 + (arg_ind);
   kill_process_if_user_addr_invalid(arg_addr);
   return arg_addr;
 }
@@ -115,52 +131,51 @@ static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
    macro intr_stack_arg, passing the esp and the argument index. */
 
 /* halt: terminates the entire OS by calling shutdown_power_off. */
-static void sys_halt(struct intr_frame* f UNUSED) { shutdown_power_off(); }
+static void* sys_halt(int argc, void* argv[] UNUSED) { shutdown_power_off(); }
 
 /* exit: terminates a user process by calling process_exit. */
-static void sys_exit(struct intr_frame* f) { 
-  int status = intr_stack_arg(int, f->esp, 1); // TODO: validate this data as well
-  // Set child process status to be the status as well
-  process_exit(status); 
+static void* sys_exit(int argc, void* argv[]) {
+  int status = (int)argv[0]; // TODO: validate this data as well
+  // Set child process statxus to be the status as well
+  process_exit(status);
 }
 
-static void sys_exec(struct intr_frame *f) {
-  const char *cmd_line = intr_stack_arg(const char *, f->esp, 1);
+static void* sys_exec(int argc, void* argv[]) {
+  const char* cmd_line = (const char*)argv[0];
   tid_t proc_res = process_execute(cmd_line);
-  // TODO: set up the f->eax to be pid_t
+  return (void*)proc_res;
 }
 
-static void sys_wait(struct intr_frame *f) {
+static void* sys_wait(int argc, void* argv[]) {
   // TODO: validate the thing
-  tid_t pid = intr_stack_arg(tid_t, f->esp, 1);
+  tid_t pid = (tid_t)argv[0];
   int res = process_wait(pid);
-  // TODO: set up the f->eax to be res
+  return (void*)res;
 }
 
-static void sys_create(struct intr_frame *f) {
-  const char *file = intr_stack_arg(const char *, f->esp, 1);
-  unsigned initial_size = intr_stack_arg(unsigned, f->esp, 2);
+static void* sys_create(int argc, void* argv[]) {
+  const char* file = (const char*)argv[0];
+  unsigned initial_size = (unsigned)argv[1];
   lock_acquire(&global_file_lock);
   bool succ = filesys_create (file, initial_size);
   lock_release(&global_file_lock);
-
-  // TODO: set the f->eax to be succ
-
+  return (void*)succ;
 }
 
-static void sys_remove(struct intr_frame* f) {
-  const char* file_n = intr_stack_arg(const char*, f->esp, 1);
+static void* sys_remove(int argc, void* argv[]) {
+  const char* file_name = (const char*)argv[0];
   // TODO: validate the data
   lock_acquire(&global_file_lock);
-  bool succ = filesys_remove(file_n);
+  bool succ = filesys_remove(file_name);
   lock_release(&global_file_lock);
-  // TODO: set f->eax to succ
+
+  return (void*)file_name;
 }
 
-static void sys_open(struct intr_frame* f) {}
+static void* sys_open(int argc, void* argv[]) {}
 
-static void filesize(struct intr_frame* f) {
-  int fd = intr_stack_arg(int, f->esp, 1);
+static void* filesize(int argc, void* argv[]) {
+  int fd = (int)argv[0];
   /* If the fd corresponds to input or output files we return 0
     as we don't have file objects for them */
   if (fd < FD_BEGIN)
@@ -174,15 +189,14 @@ static void filesize(struct intr_frame* f) {
   lock_acquire(&global_file_lock);
   int length = file_length(file);
   lock_release(&global_file_lock);
-
-  // TODO: set the f->eax to lenght
+  return (void*)length;
 }
 
 /* read: */
-static void sys_read(struct intr_frame* f) {
-  int fd = intr_stack_arg(int, f->esp, 1);
-  void* buffer = intr_stack_arg(void*, f->esp, 2);
-  unsigned size = intr_stack_arg(unsigned, f->esp, 3);
+static void* sys_read(int argc, void* argv[]) {
+  int fd = (int)argv[0];
+  void* buffer = argv[1];
+  unsigned size = (unsigned)argv[2];
 
   // TODO: validate user data of buffer with size
 
@@ -213,7 +227,7 @@ static void sys_read(struct intr_frame* f) {
   int bytes_read = file_read_at(file, buffer, size, offset);
   lock_release(&global_file_lock);
 
-  // TODO: set f->eax to be bytes_read
+  return (void*)bytes_read;
 }
 
 /* write: size number of bytes from buffer to fd */
