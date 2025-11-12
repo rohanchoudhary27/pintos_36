@@ -24,8 +24,6 @@ static void kill_process_if_user_addr_invalid(const void*);
 static void exit_and_set_process_status(int);
 static void* get_syscall_arg_addr(void*, int);
 
-struct lock global_file_lock;
-
 // char *addr = *((char *) get_syscall_arg_addr(esp, 1));
 #define intr_stack_arg(type, esp, ind) *((type*)get_syscall_arg_addr(esp, ind));
 
@@ -167,7 +165,7 @@ static void sys_filesize(struct intr_frame* f) {
     return SYS_ERROR;
 
   /* For any other case return the size of the file */
-  struct file* file = sys_process_get_file(fd);
+  struct file* file = process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
     return SYS_ERROR;
   }

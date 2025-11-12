@@ -2,6 +2,7 @@
 #define USERPROG_PROCESS_H
 
 #include "lib/kernel/hash.h"
+#include "syscall.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 
@@ -29,7 +30,7 @@ struct file_desc {
 struct process {
   uint32_t* pagedir;          /* Process page directory. */
   struct thread* thread;      /* Process underlying kernel thread. */
-  struct file* file;          /* Process executable file */
+  struct file* executable;    /* Process executable file */
   struct list fd_table;       /* List that contains fd file pairs */
   uint32_t next_fd;           /* The next file descriptor value */
   struct process* parent;     /* Parent of the process. */

@@ -14,6 +14,8 @@
 
 typedef void(syscall)(struct intr_frame*);
 
+struct lock global_file_lock;
+
 void syscall_init(void);
 
 void sys_halt(struct intr_frame* f);
