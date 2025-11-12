@@ -18,6 +18,20 @@
 
 #define SYSCALL_NUMBER_BITS 32
 
+static void* sys_halt(int argc, void* argv[] UNUSED);
+static void* sys_exit(int argc, void* argv[]);
+static void* sys_exec(int argc, void* argv[]);
+static void* sys_wait(int argc, void* argv[]);
+static void* sys_create(int argc, void* argv[]);
+static void* sys_remove(int argc, void* argv[]);
+static void* sys_open(int argc, void* argv[]);
+static void* filesize(int argc, void* argv[]);
+static void* sys_read(int argc, void* argv[]);
+int sys_write(int fd, const void* buffer, unsigned size);
+void sys_seek(int fd, unsigned position);
+unsigned sys_tell(int fd);
+void sys_close(int fd);
+
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
 static void is_valid_uaddr(const void*);
