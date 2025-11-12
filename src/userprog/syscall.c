@@ -25,7 +25,7 @@ static void* sys_wait(int argc, void* argv[]);
 static void* sys_create(int argc, void* argv[]);
 static void* sys_remove(int argc, void* argv[]);
 static void* sys_open(int argc, void* argv[]);
-static void* filesize(int argc, void* argv[]);
+static void* sys_filesize(int argc, void* argv[]);
 static void* sys_read(int argc, void* argv[]);
 static void* sys_write(int argc, void* argv[]);
 static void* sys_seek(int argc, void* argv[]);
@@ -44,12 +44,47 @@ struct syscall_descriptor {
   syscall_f sys_func;
 };
 
-/* For now, let's store the table as an array with indices representing
-    syscall numbers, and the value being the function pointer. Maybe we
-    can in the future turn this into hashmap. */
 static struct syscall_descriptor syscall_map[] = {
-    [SYS_HALT] = {
-        .argc = 0, .is_return_void = 1, .sys_func = (syscall_f)sys_halt}};
+    [SYS_HALT] = {.argc = 0,
+                  .is_return_void = 1,
+                  .sys_func = (syscall_f)sys_halt},
+    [SYS_EXIT] = {.argc = 1,
+                  .is_return_void = 1,
+                  .sys_func = (syscall_f)sys_exit},
+    [SYS_EXEC] = {.argc = 1,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_exec},
+    [SYS_WAIT] = {.argc = 1,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_wait},
+    [SYS_CREATE] = {.argc = 2,
+                    .is_return_void = 0,
+                    .sys_func = (syscall_f)sys_create},
+    [SYS_REMOVE] = {.argc = 1,
+                    .is_return_void = 0,
+                    .sys_func = (syscall_f)sys_remove},
+    [SYS_OPEN] = {.argc = 1,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_open},
+    [SYS_FILESIZE] = {.argc = 1,
+                      .is_return_void = 0,
+                      .sys_func = (syscall_f)sys_filesize},
+    [SYS_READ] = {.argc = 3,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_read},
+
+    [SYS_WRITE] = {.argc = 3,
+                   .is_return_void = 0,
+                   .sys_func = (syscall_f)sys_write},
+
+    [SYS_SEEK] = {.argc = 2,
+                  .is_return_void = 1,
+                  .sys_func = (syscall_f)sys_seek},
+    [SYS_TELL] = {.argc = 1,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_tell},
+    [SYS_CLOSE] = {
+        .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_close}};
 
 void syscall_init(void) {
   lock_init(&global_file_lock);
@@ -81,7 +116,7 @@ static void syscall_handler(struct intr_frame* f) {
    address is invalid, i.e., address is in the user space, not null, and is
    mapped. */
 static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
-  is_valid_udata(f->esp, 32);
+  is_valid_udata(f->esp, SYSCALL_NUMBER_BITS);
   uint32_t* esp = (uint32_t*)f->esp;
   uint32_t syscall_no = *esp;
   return syscall_no;
@@ -119,13 +154,21 @@ static void exit_and_set_process_status(int status) {
 
   lock_acquire(&curr_thread->process->process_lock);
   curr_thread->process->exit_status = status;
+  struct hash children_hashmap = curr_thread->process->children;
+  struct hash_iterator i;
+  hash_first(&i, &children_hashmap);
+  while (has_next(&i)) {
+    struct child_process* cp =
+        hash_entry(hash_cur(&i), struct child_process, elem);
+    cp->exit_status = status;
+  }
   lock_release(&curr_thread->process->process_lock);
   process_exit(status);
 }
 
 /* Retrieves the address of a system call argument from the interrupt frame
-   stack pointer. Calculates the memory address based on the esp and argument
-   index. Kills the process if the argument address is invalid. */
+   stack pointer. Calculates the memory address based on the esp and
+   argument index. Kills the process if the argument address is invalid. */
 static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
   void* arg_addr = ((int*)f_esp) + 1 + (arg_ind);
   is_valid_uaddr(arg_addr);
@@ -145,15 +188,31 @@ static void* sys_halt(int argc, void* argv[] UNUSED) { shutdown_power_off(); }
 
 /* exit: terminates a user process by calling process_exit. */
 static void* sys_exit(int argc, void* argv[]) {
-  int status = (int)argv[0]; // TODO: validate this data as well
+  int status = (int)argv[0];
   // Set child process statxus to be the status as well
-  process_exit(status);
+  exit_and_set_process_status(status);
 }
 
 static void* sys_exec(int argc, void* argv[]) {
   const char* cmd_line = (const char*)argv[0];
   is_valid_udata(cmd_line, PGSIZE);
   tid_t proc_res = process_execute(cmd_line);
+  // wait for child process
+  struct thread* current_thread = thread_current();
+  if (current_thread == NULL) {
+    return (void*)SYS_ERROR;
+  }
+  struct child_process cp;
+  cp.pid = proc_res;
+
+  struct hash_elem* child_hash =
+      hash_find(&current_thread->process->children, &cp.elem);
+  if (child_hash == NULL) {
+    return (void*)SYS_ERROR;
+  }
+  struct child_process* child_p =
+      hash_entry(child_hash, struct child_process, elem);
+  sema_down(&child_p->wait_sema);
   return (void*)proc_res;
 }
 
@@ -206,7 +265,7 @@ static void* sys_open(int argc, void* argv[]) {
   return pd;
 }
 
-static void* filesize(int argc, void* argv[]) {
+static void* sys_filesize(int argc, void* argv[]) {
   int fd = (int)argv[0];
   /* If the fd corresponds to input or output files we return 0
     as we don't have file objects for them */
