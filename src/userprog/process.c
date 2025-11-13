@@ -127,6 +127,11 @@ process_execute (const char *cmd_line)
   child_p->pid = (pid_t)tid;
   child_p->exit_status = PROC_ERR;
   child_p->has_exited = false;
+
+  child_p->exists = true;     /* Child process exists when created */
+  child_p->has_parent = true; /* Parent exists initially */
+
+  cond_init(&child_p->load_condition);
   sema_init(&child_p->wait_sema, 0);
   hash_insert(&cur->process->children, &child_p->elem);
 
@@ -156,6 +161,9 @@ process_init (struct thread *t)
   process->exit_status = PROC_ERR;
   hash_init(&process->fd_table, hash_fd_table, hash_less_fd_table, NULL);
   process->next_fd = FD_BEGIN;
+
+  /* Initializing lock of process struct*/
+  lock_init(&process->process_lock);
 
   /* Link thread to its process. */
   t->process = process;
