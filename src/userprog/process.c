@@ -19,19 +19,21 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define BYTE_SIZE 4
+
 static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static char** parse_cmd_line(const char*, int*);
 
-/* Hash calculation function for child processes hashmap. */
+/* child proc hash func */
 static unsigned hash_child_process(const struct hash_elem* e,
                                    void* aux UNUSED) {
   struct child_process* child = hash_entry(e, struct child_process, elem);
   return hash_int(child->pid);
 }
 
-/* Comparison function for child processes hashmap. */
+/* child proc hashmap comparision func */
 static bool hash_less_child_process(const struct hash_elem* a,
                                     const struct hash_elem* b,
                                     void* aux UNUSED) {
@@ -212,7 +214,23 @@ static bool push_arguments(void** esp, char** argv, int argc) {
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* args_) {
-  // char* argv = malloc(PGSIZE / sizeof(char*));
+
+  // size of stack to check for overflow
+  size_t size_stack = BYTE_SIZE * sizeof(void*);
+
+  size_t max_args = (strlen(args_) + 1) / 2;
+
+  size_t count_max_args =
+      (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
+
+  char** argv = malloc(max(max_args, count_max_args) * sizeof(char*));
+
+  bool success = true;
+
+  if (argv == NULL) {
+    success = false; // This needs to be some other error
+  }
+
   int argc = 0;
   char** argv = parse_cmd_line(args_, &argc);
   printf("argc: %d\n", argc);
@@ -222,29 +240,34 @@ static void start_process(void* args_) {
   struct thread *cur = thread_current ();
   char *file_name = args_;
   struct intr_frame if_;
-  bool success;
-  
-  /* Initialise process. */
-  success = process_init (cur);
 
   if (success) {
-    /* Initialize interrupt frame and load executable. */
-    memset(&if_, 0, sizeof if_);
-    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-    if_.cs = SEL_UCSEG;
-    if_.eflags = FLAG_IF | FLAG_MBS;
-    success = load(argv[0], &if_.eip, &if_.esp);
-    if (success) {
-      success = push_arguments(&if_.esp, argv, argc);
-    }
+    success = process_init(cur);
   }
 
+  if (success)
+    {
+      /* Initialize interrupt frame and load executable. */
+      memset (&if_, 0, sizeof if_);
+      if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+      if_.cs = SEL_UCSEG;
+      if_.eflags = FLAG_IF | FLAG_MBS;
+      success = load(argv[0], &if_.eip, &if_.esp);
+      if (success) {
+        success = push_arguments(&if_.esp, argv, argc);
+      }
+  }
+
+  size_stack = (size_stack + (BYTE_SIZE - 1)) &
+               ~(BYTE_SIZE - 1) + (argc * (int)sizeof(char*));
+
+  if (size_stack > PGSIZE || argv[argc]) {
+    success = false;
+  }
+
+  /* After loading, we are done with the command-line copy passed to us by process_execute. */
+  palloc_free_page (file_name);
   free(argv);
-
-  /* After loading, we are done with the command-line copy passed to us by
-   * process_execute. */
-  palloc_free_page(file_name);
-
   /* If load failed, terminate the process. */
   if (!success)
     process_exit(PROC_ERR);
@@ -273,7 +296,7 @@ int process_wait(tid_t child_tid UNUSED) {
   struct child_process mock_child;
   mock_child.pid = (pid_t)child_tid;
   struct hash_elem* e =
-      hash_find(&thread_current()->process->children, &mock_child.elem);
+      hash_find(&thread_current()->process->child, &mock_child.elem);
   if (e == NULL)
     return -1; // Invalid or non-child PID
 
@@ -295,11 +318,63 @@ int process_wait(tid_t child_tid UNUSED) {
   return exit_status; // Return child’s exit code to parent
 }
 
+/* Helper func to destroy children*/
+static void destroy_children(struct hash_elem* e, void* aux UNUSED) {
+  struct child_process* child = hash_entry(e, struct child_process, elem);
+
+  bool flag_free = false;
+  lock_acquire(&child->exit_lock);
+  /* If child does not exist, since parent is dying, free child_info. */
+  if (child->exists) {
+    child->has_parent = false;
+  } else {
+    flag_free = true;
+  }
+  lock_release(&child->exit_lock);
+
+  if (flag_free) {
+    free(child);
+  }
+}
+
+/* Helper func to destroy fd_table */
+void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
+  struct file_desc* fd = hash_entry(element, struct file_desc, elem);
+  file_close(fd->file);
+  free(fd);
+}
+
 /* Free the current process's resources and then exit the underlying thread. */
 void
 process_exit (int exit_code UNUSED)
 {
   struct process *cur = thread_current ()->process;
+
+  bool flag_free = false;
+
+  lock_acquire(&cur->child->exit_lock);
+  /* telling parent child has exited and frees child_process if parent also
+   dead*/
+  if (cur->child->has_parent) {
+    cur->child->exists = false;
+    sema_up(&cur->child->wait_sema);
+  } else {
+    flag_free = true;
+  }
+  lock_release(&cur->child->exit_lock);
+
+  if (flag_free) {
+    free(cur->child);
+  }
+
+  /* kill all children */
+  hash_destroy(&cur->children, destroy_children);
+
+  /* destroy fd_table */
+  lock_acquire(&cur->process_lock);
+  hash_destroy(&cur->fd_table, destroy_fd_table);
+  lock_release(&cur->process_lock);
+
   uint32_t *pd;
   struct file *file;
   
@@ -762,6 +837,12 @@ process_close_file(int fd)
   lock_acquire(&global_file_lock);
   file_close(f->file);
   lock_release(&global_file_lock);
+  free(f);
+}
+
+/* Helper function for freeing has elements*/
+static void free_all_hash_elements(struct hash_elem* element, void* aux) {
+  struct file_desc* f = hash_entry(element, struct file_desc, elem);
   free(f);
 }
 
