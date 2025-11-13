@@ -38,8 +38,6 @@ struct child_process {
   bool exists; // if child exists
   bool has_parent;
 
-  bool loaded; // Will use this in child_process inialization
-
   struct condition load_condition; // Should be initialized to
 };
 
