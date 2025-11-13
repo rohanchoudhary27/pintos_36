@@ -131,6 +131,7 @@ process_execute (const char *cmd_line)
   child_p->exists = true;     /* Child process exists when created */
   child_p->has_parent = true; /* Parent exists initially */
 
+  lock_init(&child_p->exit_lock);
   cond_init(&child_p->load_condition);
   sema_init(&child_p->wait_sema, 0);
   hash_insert(&cur->process->children, &child_p->elem);
