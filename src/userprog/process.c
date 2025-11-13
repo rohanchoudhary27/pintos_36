@@ -25,6 +25,7 @@ static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static char** parse_cmd_line(const char*, int*);
+static void destroy_fd_table(struct hash_elem*, void*);
 
 /* child proc hash func */
 static unsigned hash_child_process(const struct hash_elem* e,
@@ -218,18 +219,19 @@ static void start_process(void* args_) {
   // size of stack to check for overflow
   size_t size_stack = BYTE_SIZE * sizeof(void*);
 
-  size_t max_args = (strlen(args_) + 1) / 2;
+  // size_t max_args = (strlen(args_) + 1) / 2;
 
-  size_t count_max_args =
-      (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
+  // size_t count_max_args =
+  //     (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
 
-  char** argv = malloc(max(max_args, count_max_args) * sizeof(char*));
+  // size_t max_of_args = count_max_args > max_args ? count_max_args : max_args;
+  // char** argv = malloc(max_of_args * sizeof(char*));
 
   bool success = true;
 
-  if (argv == NULL) {
-    success = false; // This needs to be some other error
-  }
+  // if (argv == NULL) {
+  //   success = false; // This needs to be some other error
+  // }
 
   int argc = 0;
   char** argv = parse_cmd_line(args_, &argc);
@@ -259,7 +261,7 @@ static void start_process(void* args_) {
   }
 
   size_stack = (size_stack + (BYTE_SIZE - 1)) &
-               ~(BYTE_SIZE - 1) + (argc * (int)sizeof(char*));
+               (~(BYTE_SIZE - 1) + (argc * (int)sizeof(char*)));
 
   if (size_stack > PGSIZE || argv[argc]) {
     success = false;
@@ -296,7 +298,7 @@ int process_wait(tid_t child_tid UNUSED) {
   struct child_process mock_child;
   mock_child.pid = (pid_t)child_tid;
   struct hash_elem* e =
-      hash_find(&thread_current()->process->child, &mock_child.elem);
+      hash_find(&thread_current()->process->children, &mock_child.elem);
   if (e == NULL)
     return -1; // Invalid or non-child PID
 
@@ -338,7 +340,7 @@ static void destroy_children(struct hash_elem* e, void* aux UNUSED) {
 }
 
 /* Helper func to destroy fd_table */
-void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
+static void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
   struct file_desc* fd = hash_entry(element, struct file_desc, elem);
   file_close(fd->file);
   free(fd);
@@ -837,12 +839,6 @@ process_close_file(int fd)
   lock_acquire(&global_file_lock);
   file_close(f->file);
   lock_release(&global_file_lock);
-  free(f);
-}
-
-/* Helper function for freeing has elements*/
-static void free_all_hash_elements(struct hash_elem* element, void* aux) {
-  struct file_desc* f = hash_entry(element, struct file_desc, elem);
   free(f);
 }
 
