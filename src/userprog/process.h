@@ -23,7 +23,7 @@ typedef int pid_t;
 struct file_desc {
   int fd;
   struct file* file;
-  struct list_elem elem;
+  struct hash_elem elem;
 };
 
 /* A user process, wrapped around a kernel thread. */
@@ -31,14 +31,15 @@ struct process {
   uint32_t* pagedir;          /* Process page directory. */
   struct thread* thread;      /* Process underlying kernel thread. */
   struct file* executable;    /* Process executable file */
-  struct list fd_table;       /* List that contains fd file pairs */
+  struct hash fd_table;       /* Hashmap that contains fd file pairs */
   uint32_t next_fd;           /* The next file descriptor value */
   struct process* parent;     /* Parent of the process. */
-  struct hash children;       /* List of child_process. */
+  struct hash children;       /* Hashmap of child_process. */
   int exit_status;            /* Current exit status of the process. */
   struct lock process_lock;   /* Per process lock. */
   struct semaphore wait_sema; /* Semaphore for the children processes the
                                  process is waiting for. */
+  struct child_process* child;
 };
 
 struct child_process {
@@ -48,6 +49,13 @@ struct child_process {
   struct semaphore wait_sema;
   struct lock exit_lock;
   struct hash_elem elem;
+
+  bool exists; // if child exists
+  bool has_parent;
+
+  bool loaded; // Will use this in child_process inialization
+
+  struct condition load_condition; // Should be initialized to
 };
 
 void root_process_init(void);

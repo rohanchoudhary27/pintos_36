@@ -25,20 +25,34 @@ static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-/* Hash calculation function for child processes hashmap. */
+/* child proc hash func */
 static unsigned hash_child_process(const struct hash_elem* e,
                                    void* aux UNUSED) {
   struct child_process* child = hash_entry(e, struct child_process, elem);
   return hash_int(child->pid);
 }
 
-/* Comparison function for child processes hashmap. */
+/* child proc hashmap comparision func */
 static bool hash_less_child_process(const struct hash_elem* a,
                                     const struct hash_elem* b,
                                     void* aux UNUSED) {
   struct child_process* child_a = hash_entry(a, struct child_process, elem);
   struct child_process* child_b = hash_entry(b, struct child_process, elem);
   return (child_a->pid < child_b->pid);
+}
+
+/* fd hash func */
+static unsigned hash_fd(const struct hash_elem* e, void* aux UNUSED) {
+  const struct file_desc* file = hash_entry(e, struct file_desc, elem);
+  return hash_int(file->fd);
+}
+
+/* Comparison function for file descriptor. */
+static bool hash_less_fd(const struct hash_elem* a, const struct hash_elem* b,
+                         void* aux UNUSED) {
+  const struct file_desc* file_a = hash_entry(a, struct file_desc, elem);
+  const struct file_desc* file_b = hash_entry(b, struct file_desc, elem);
+  return file_a->fd < file_b->fd;
 }
 
 /* Initialises the main thread as a minimal root OS process.
@@ -139,7 +153,7 @@ process_init (struct thread *t)
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
   process->exit_status = PROC_ERR;
-  list_init(&process->fd_table);
+  hash_init(&process->fd_table, hash_fd, hash_less_fd, NULL);
   process->next_fd = FD_BEGIN;
 
   /* Link thread to its process. */
@@ -233,6 +247,7 @@ static void start_process(void* args_) {
         success = push_arguments(&if_.esp, argv, argc);
       }
   }
+
   size_stack = (size_stack + (BYTE_SIZE - 1)) &
                ~(BYTE_SIZE - 1) + (argc * (int)sizeof(char*));
 
@@ -271,7 +286,7 @@ int process_wait(tid_t child_tid UNUSED) {
   struct child_process mock_child;
   mock_child.pid = (pid_t)child_tid;
   struct hash_elem* e =
-      hash_find(&thread_current()->process->children, &mock_child.elem);
+      hash_find(&thread_current()->process->child, &mock_child.elem);
   if (e == NULL)
     return -1; // Invalid or non-child PID
 
@@ -293,11 +308,63 @@ int process_wait(tid_t child_tid UNUSED) {
   return exit_status; // Return child’s exit code to parent
 }
 
+/* Helper func to destroy children*/
+static void destroy_children(struct hash_elem* e, void* aux UNUSED) {
+  struct child_process* child = hash_entry(e, struct child_process, elem);
+
+  bool flag_free = false;
+  lock_acquire(&child->exit_lock);
+  /* If child does not exist, since parent is dying, free child_info. */
+  if (child->exists) {
+    child->has_parent = false;
+  } else {
+    flag_free = true;
+  }
+  lock_release(&child->exit_lock);
+
+  if (flag_free) {
+    free(child);
+  }
+}
+
+/* Helper func to destroy fd_table */
+void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
+  struct file_desc* fd = hash_entry(element, struct file_desc, elem);
+  file_close(fd->file);
+  free(fd);
+}
+
 /* Free the current process's resources and then exit the underlying thread. */
 void
 process_exit (int exit_code UNUSED)
 {
   struct process *cur = thread_current ()->process;
+
+  bool flag_free = false;
+
+  lock_acquire(&cur->child->exit_lock);
+  /* telling parent child has exited and frees child_process if parent also
+   dead*/
+  if (cur->child->has_parent) {
+    cur->child->exists = false;
+    sema_up(&cur->child->wait_sema);
+  } else {
+    flag_free = true;
+  }
+  lock_release(&cur->child->exit_lock);
+
+  if (flag_free) {
+    free(cur->child);
+  }
+
+  /* kill all children */
+  hash_destroy(&cur->children, destroy_children);
+
+  /* destroy fd_table */
+  lock_acquire(&cur->process_lock);
+  hash_destroy(&cur->fd_table, destroy_fd_table);
+  lock_release(&cur->process_lock);
+
   uint32_t *pd;
   struct file *file;
   
@@ -708,13 +775,13 @@ struct file *
 process_get_file(int fd)
 {
     struct process *cur = thread_current ()->process;
-    struct list_elem *e;
+    struct hash_iterator i;
+    hash_first(&i, &cur->fd_table);
 
-    for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
-    {
-        struct file_desc *f = list_entry(e, struct file_desc, elem);
-        if (f->fd == fd)
-            return f->file;
+    while (hash_next(&i)) {
+      struct file_desc* f = hash_entry(hash_cur(&i), struct file_desc, elem);
+      if (f->fd == fd)
+        return f->file;
     }
     return NULL;
 }
@@ -737,7 +804,7 @@ process_add_file(struct file *f)
 
     fd->fd = cur->next_fd++;
     fd->file = f;
-    list_push_back(&cur->fd_table, &fd->elem);
+    hash_insert(&cur->fd_table, &fd->elem);
     return fd->fd;
 }
 
@@ -749,17 +816,23 @@ process_close_file(int fd)
       return;
 
   struct process *cur = thread_current ()->process;
-  struct list_elem *e;
+  struct hash_iterator i;
+  hash_first(&i, &cur->fd_table);
 
-  for (e = list_begin(&cur->fd_table); e != list_end(&cur->fd_table); e = list_next(e))
-  {
-      struct file_desc *f = list_entry(e, struct file_desc, elem);
-      if (f->fd == fd) {
-        file_close(f->file);
-        free(f);
-        return;
-      }
+  while (hash_next(&i)) {
+    struct file_desc* f = hash_entry(hash_cur(&i), struct file_desc, elem);
+    if (f->fd == fd) {
+      file_close(f->file);
+      free(f);
+      return;
+    }
   }
+}
+
+/* Helper function for freeing has elements*/
+static void free_all_hash_elements(struct hash_elem* element, void* aux) {
+  struct file_desc* f = hash_entry(element, struct file_desc, elem);
+  free(f);
 }
 
 /* Close all of the open files the current process has. */
@@ -767,13 +840,5 @@ void
 process_close_all_files(void)
 {
     struct process *cur = thread_current ()->process;
-    struct list_elem *e = list_begin(&cur->fd_table);
-
-    while (e != list_end(&cur->fd_table))
-    {
-        struct file_desc *f = list_entry(e, struct file_desc, elem);
-        e = list_remove(&f->elem);
-        file_close(f->file);
-        free(f);
-    }
+    hash_clear(&cur->fd_table, free_all_hash_elements);
 }
