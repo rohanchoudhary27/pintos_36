@@ -24,6 +24,7 @@
 static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static char** parse_cmd_line(const char*, int*);
 
 /* child proc hash func */
 static unsigned hash_child_process(const struct hash_elem* e,
@@ -41,18 +42,18 @@ static bool hash_less_child_process(const struct hash_elem* a,
   return (child_a->pid < child_b->pid);
 }
 
-/* fd hash func */
-static unsigned hash_fd(const struct hash_elem* e, void* aux UNUSED) {
-  const struct file_desc* file = hash_entry(e, struct file_desc, elem);
-  return hash_int(file->fd);
+/* Hash calculation function for file descriptions' hashmap. */
+static unsigned hash_fd_table(const struct hash_elem* e, void* aux UNUSED) {
+  struct file_desc* file_desc = hash_entry(e, struct file_desc, elem);
+  return hash_int(file_desc->fd);
 }
 
-/* Comparison function for file descriptor. */
-static bool hash_less_fd(const struct hash_elem* a, const struct hash_elem* b,
-                         void* aux UNUSED) {
-  const struct file_desc* file_a = hash_entry(a, struct file_desc, elem);
-  const struct file_desc* file_b = hash_entry(b, struct file_desc, elem);
-  return file_a->fd < file_b->fd;
+/* Comparison function for file descriptions' hashmap. */
+static bool hash_less_fd_table(const struct hash_elem* a,
+                               const struct hash_elem* b, void* aux UNUSED) {
+  struct file_desc* file_desc_a = hash_entry(a, struct file_desc, elem);
+  struct file_desc* file_desc_b = hash_entry(b, struct file_desc, elem);
+  return (file_desc_a->fd < file_desc_b->fd);
 }
 
 /* Initialises the main thread as a minimal root OS process.
@@ -67,7 +68,7 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
-char** parse_cmd_line(const char* cmd_line, int* argc) {
+static char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* copy = palloc_get_page(0);
   ASSERT(copy != NULL);
 
@@ -76,7 +77,6 @@ char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* save_ptr;
   char* token;
 
-  token = strtok_r(copy, " ", &save_ptr);
   int count = 0;
 
   for (token = strtok_r(copy, " ", &save_ptr); token != NULL;
@@ -85,7 +85,7 @@ char** parse_cmd_line(const char* cmd_line, int* argc) {
 
   *argc = count;
 
-  char** argv[*argc];
+  char** argv = malloc(sizeof(char*) * *argc);
   char *save_ptr_ii;
   strlcpy(copy, cmd_line, PGSIZE);
 
@@ -122,7 +122,7 @@ process_execute (const char *cmd_line)
     return TID_ERROR;
   }
 
-  struct child_process* child_p;
+  struct child_process* child_p = malloc(sizeof(struct child_process));
   child_p->pid = (pid_t)tid;
   child_p->exit_status = PROC_ERR;
   child_p->has_exited = false;
@@ -153,7 +153,7 @@ process_init (struct thread *t)
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
   process->exit_status = PROC_ERR;
-  hash_init(&process->fd_table, hash_fd, hash_less_fd, NULL);
+  hash_init(&process->fd_table, hash_fd_table, hash_less_fd_table, NULL);
   process->next_fd = FD_BEGIN;
 
   /* Link thread to its process. */
@@ -161,9 +161,15 @@ process_init (struct thread *t)
   return true;
 }
 
-static void push_data(void** esp, const void* data, size_t bytes) {
+static void push_pointer_data(void** esp, const void* data, size_t bytes) {
   *esp -= bytes;
-  memcpy(*esp, data, bytes);
+  memcpy(*esp, &data, bytes);
+}
+
+static void push_string_data(void** esp, const char* sdata) {
+  size_t bytes = strlen(sdata) + 1;
+  *esp -= bytes;
+  strlcpy(*esp, sdata, bytes);
 }
 
 static void push_null(void** esp) {
@@ -183,23 +189,23 @@ static bool push_arguments(void** esp, char** argv, int argc) {
   char* arg_addrs[argc];
 
   for (int i = argc - 1; i >= 0; i--) {
-    size_t len = strlen(argv[i]) + 1;
-    push_data(esp, argv[i], len);
+    push_string_data(esp, argv[i]);
     arg_addrs[i] = *esp;
   }
 
-  align_stack(esp, 8);
+  align_stack(esp, 4);
+  // *esp = (void*)((uintptr_t)(*esp) & ~(4 - 1));
 
   push_null(esp);
 
   for (int i = argc - 1; i >= 0; i--) {
-    push_data(esp, &arg_addrs[i], sizeof(char*));
+    push_pointer_data(esp, arg_addrs[i], sizeof(char*));
   }
 
   char** argv_addr = *esp;
-  push_data(esp, &argv_addr, sizeof(char**));
+  push_pointer_data(esp, &argv_addr, sizeof(char**));
 
-  push_data(esp, &argc, sizeof(int));
+  push_pointer_data(esp, (void*)argc, sizeof(int));
   push_null(esp);
 
   return true;
@@ -226,9 +232,13 @@ static void start_process(void* args_) {
   }
 
   int argc = 0;
-  char* file_name = args_;
-  argv = parse_cmd_line(args_, &argc);
-  struct thread* cur = thread_current();
+  char** argv = parse_cmd_line(args_, &argc);
+  printf("argc: %d\n", argc);
+  for (int i = 0; i < argc; i++) {
+    printf("argv[%d]: %s\n", i, argv[i]);
+  }
+  struct thread *cur = thread_current ();
+  char *file_name = args_;
   struct intr_frame if_;
 
   if (success) {
@@ -259,17 +269,17 @@ static void start_process(void* args_) {
   palloc_free_page (file_name);
   free(argv);
   /* If load failed, terminate the process. */
-  if (!success) 
-    process_exit (PROC_ERR);
+  if (!success)
+    process_exit(PROC_ERR);
 
   /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  NOT_REACHED ();
+      interrupt, implemented by intr_exit (in
+      threads/intr-stubs.S).  Because intr_exit takes all of its
+      arguments on the stack in the form of a `struct intr_frame',
+      we just point the stack pointer (%esp) to our stack frame
+      and jump to it. */
+  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+  NOT_REACHED();
 }
 
 /* Waits for thread TID to die and returns its exit status. 
@@ -742,7 +752,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
@@ -774,59 +784,60 @@ install_page (void *upage, void *kpage, bool writable)
 struct file *
 process_get_file(int fd)
 {
-    struct process *cur = thread_current ()->process;
-    struct hash_iterator i;
-    hash_first(&i, &cur->fd_table);
+  struct process* cur = thread_current()->process;
+  struct file_desc key;
+  key.fd = fd;
 
-    while (hash_next(&i)) {
-      struct file_desc* f = hash_entry(hash_cur(&i), struct file_desc, elem);
-      if (f->fd == fd)
-        return f->file;
-    }
+  struct hash_elem* e = hash_find(&cur->fd_table, &key.elem);
+  if (e == NULL)
     return NULL;
+
+  struct file_desc* f = hash_entry(e, struct file_desc, elem);
+  return f->file;
 }
 
 /* Add a file to the current process and return the file
-   descriptor (fd) as a return value. */
+   descriptor (fd) as a return value. Returns -1 if
+   operation fails. */
 int
 process_add_file(struct file *f)
 {
-    if (f == NULL)
-        return -1;
+  if (f == NULL)
+    return -1;
 
-    struct process *cur = thread_current ()->process;
-    struct file_desc *fd = malloc(sizeof *fd);
-    if (fd == NULL)
-    {
-        file_close(f);
-        return -1;
-    }
+  struct process* cur = thread_current()->process;
+  struct file_desc* fd = malloc(sizeof *fd);
 
-    fd->fd = cur->next_fd++;
-    fd->file = f;
-    hash_insert(&cur->fd_table, &fd->elem);
-    return fd->fd;
+  if (fd == NULL)
+    return -1;
+
+  fd->fd = cur->next_fd++;
+  fd->file = f;
+  hash_insert(&cur->fd_table, &fd->elem);
+  return fd->fd;
 }
 
 /* Removes a file from the current process. */
 void
 process_close_file(int fd)
 {
-  if (fd == NULL)
-      return;
+  if (fd == NULL || fd == 0)
+    return;
 
   struct process *cur = thread_current ()->process;
-  struct hash_iterator i;
-  hash_first(&i, &cur->fd_table);
+  struct file_desc key;
+  key.fd = fd;
 
-  while (hash_next(&i)) {
-    struct file_desc* f = hash_entry(hash_cur(&i), struct file_desc, elem);
-    if (f->fd == fd) {
-      file_close(f->file);
-      free(f);
-      return;
-    }
-  }
+  struct hash_elem* e = hash_find(&cur->fd_table, &key.elem);
+  if (e == NULL)
+    return;
+
+  struct file_desc* f = hash_entry(e, struct file_desc, elem);
+  hash_delete(&cur->fd_table, &f->elem);
+  lock_acquire(&global_file_lock);
+  file_close(f->file);
+  lock_release(&global_file_lock);
+  free(f);
 }
 
 /* Helper function for freeing has elements*/
@@ -839,6 +850,23 @@ static void free_all_hash_elements(struct hash_elem* element, void* aux) {
 void
 process_close_all_files(void)
 {
-    struct process *cur = thread_current ()->process;
-    hash_clear(&cur->fd_table, free_all_hash_elements);
+  struct process* cur = thread_current()->process;
+
+  /* Either iterate and delete or just destroy with a destructor. */
+  struct hash_iterator it;
+  hash_first(&it, &cur->fd_table);
+  while (hash_cur(&it) != NULL) {
+    struct hash_elem* e = hash_cur(&it);
+    struct file_desc* f = hash_entry(e, struct file_desc, elem);
+
+    /* Move iterator before we delete. */
+    hash_next(&it);
+    hash_delete(&cur->fd_table, &f->elem);
+
+    lock_acquire(&global_file_lock);
+    file_close(f->file);
+    lock_release(&global_file_lock);
+
+    free(f);
+  }
 }

@@ -7,7 +7,9 @@
       "interrupt.h": "c",
       "stdbool.h": "c",
       "syscall-nr.h": "c",
-      "inttypes.h": "c"
+      "inttypes.h": "c",
+      "stdio.h": "c",
+      "debug.h": "c"
     },
     "C_Cpp.default.defines": [
 		  "USERPROG"

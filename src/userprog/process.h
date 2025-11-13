@@ -9,22 +9,7 @@
 #define PROC_SUCC (0)  /* Exit code for normal process termination. */
 #define PROC_ERR (-1)  /* Exit code for erroneous process termination. */
 
-/* The value next_fd begins at. Needed to reserve some fd's
-   for input and output file */
-#define FD_BEGIN (2)
-
-/* file descriptor values that corresponds to input and output files */
-#define INPUT_FILE_FD (0)
-#define OUTPUT_FILE_FD (1)
-
 typedef int pid_t;
-
-/* File descriptor to file pairs struct that can be added to lists */
-struct file_desc {
-  int fd;
-  struct file* file;
-  struct hash_elem elem;
-};
 
 /* A user process, wrapped around a kernel thread. */
 struct process {
