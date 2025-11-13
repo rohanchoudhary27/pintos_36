@@ -95,7 +95,7 @@ void syscall_init(void) {
 static void syscall_handler(struct intr_frame* f) {
   int syscall_no = get_syscall_number_from_frame(f);
   int num_syscall_funcs = sizeof(syscall_map) / sizeof(syscall_map[0]);
-  if (syscall_no < num_syscall_funcs || syscall_no >= num_syscall_funcs) {
+  if (syscall_no < 0 || syscall_no >= num_syscall_funcs) {
     exit_and_set_process_status(PROC_ERR);
   }
 

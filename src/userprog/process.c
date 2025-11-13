@@ -136,8 +136,9 @@ process_execute (const char *cmd_line)
   hash_insert(&cur->process->children, &child_p->elem);
 
   struct thread* child_thread = thread_get_by_tid(tid);
-  if (child_thread == NULL && child_thread->process != NULL) {
+  if (child_thread != NULL && child_thread->process != NULL) {
     child_thread->process->parent = cur->process;
+    child_thread->process->child = child_p;
   }
   intr_set_level(old_level);
   return tid;
@@ -156,6 +157,7 @@ process_init (struct thread *t)
   process->pagedir = NULL;
   process->thread = t;
   process->parent = NULL;
+  process->child = NULL;
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
   process->exit_status = PROC_ERR;
@@ -212,9 +214,9 @@ static bool push_arguments(void** esp, char** argv, int argc) {
   }
 
   char** argv_addr = *esp;
-  push_pointer_data(esp, &argv_addr, sizeof(char**));
+  push_pointer_data(esp, argv_addr, sizeof(char**));
 
-  push_pointer_data(esp, (void*)argc, sizeof(int));
+  push_pointer_data(esp, (void*)(uintptr_t)argc, sizeof(int));
   push_null(esp);
 
   return true;
@@ -271,7 +273,7 @@ static void start_process(void* args_) {
   size_stack = (size_stack + (BYTE_SIZE - 1)) &
                (~(BYTE_SIZE - 1) + (argc * (int)sizeof(char*)));
 
-  if (size_stack > PGSIZE || argv[argc]) {
+  if (size_stack > PGSIZE) {
     success = false;
   }
 
@@ -362,19 +364,20 @@ process_exit (int exit_code UNUSED)
 
   bool flag_free = false;
 
-  lock_acquire(&cur->child->exit_lock);
   /* telling parent child has exited and frees child_process if parent also
    dead*/
-  if (cur->child->has_parent) {
-    cur->child->exists = false;
-    sema_up(&cur->child->wait_sema);
-  } else {
-    flag_free = true;
-  }
-  lock_release(&cur->child->exit_lock);
-
-  if (flag_free) {
-    free(cur->child);
+  if (cur->child != NULL) {
+    lock_acquire(&cur->child->exit_lock);
+    if (cur->child->has_parent) {
+      cur->child->exists = false;
+      sema_up(&cur->child->wait_sema);
+    } else {
+      flag_free = true;
+    }
+    lock_release(&cur->child->exit_lock);
+    if (flag_free) {
+      free(cur->child);
+    }
   }
 
   /* kill all children */
