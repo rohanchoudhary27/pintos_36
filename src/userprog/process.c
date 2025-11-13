@@ -835,7 +835,7 @@ process_add_file(struct file *f)
 void
 process_close_file(int fd)
 {
-  if (fd == NULL || fd == 0)
+  if (fd < FD_BEGIN)
     return;
 
   struct process *cur = thread_current ()->process;

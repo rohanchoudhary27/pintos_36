@@ -171,7 +171,7 @@ static void exit_and_set_process_status(int status) {
    stack pointer. Calculates the memory address based on the esp and
    argument index. Kills the process if the argument address is invalid. */
 static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
-  void* arg_addr = ((int*)f_esp) + 1 + (arg_ind);
+  void* arg_addr = (void*)*((int*)f_esp) + 1 + (arg_ind);
   is_valid_uaddr(arg_addr);
   return arg_addr;
 }
