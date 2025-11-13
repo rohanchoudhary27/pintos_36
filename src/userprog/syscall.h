@@ -18,10 +18,6 @@ typedef void* (*syscall_f)(int argc, void* argv);
    for input and output file */
 #define FD_BEGIN (2)
 
-/* file descriptor values that corresponds to input and output files */
-#define STDIN_FILENO (0)
-#define STDOUT_FILENO (1)
-
 /* File descriptor to file pairs struct that can be added to lists */
 struct file_desc {
   int fd;

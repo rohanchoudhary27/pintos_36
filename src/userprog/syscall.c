@@ -34,6 +34,7 @@ static void* sys_close(int argc, void* argv[]);
 
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
+static void is_valid_udata(const void*, unsigned);
 static void is_valid_uaddr(const void*);
 static void exit_and_set_process_status(int);
 static void* get_syscall_arg_addr(void*, int);
@@ -157,7 +158,7 @@ static void exit_and_set_process_status(int status) {
   struct hash children_hashmap = curr_thread->process->children;
   struct hash_iterator i;
   hash_first(&i, &children_hashmap);
-  while (has_next(&i)) {
+  while (hash_next(&i)) {
     struct child_process* cp =
         hash_entry(hash_cur(&i), struct child_process, elem);
     cp->exit_status = status;
@@ -184,16 +185,26 @@ static void* get_syscall_arg_addr(void* f_esp, int arg_ind) {
    macro intr_stack_arg, passing the esp and the argument index. */
 
 /* halt: terminates the entire OS by calling shutdown_power_off. */
-static void* sys_halt(int argc, void* argv[] UNUSED) { shutdown_power_off(); }
+static void* sys_halt(int argc UNUSED, void* argv[] UNUSED) {
+  if (argc != 0)
+    return NULL;
+  shutdown_power_off();
+  return NULL;
+}
 
 /* exit: terminates a user process by calling process_exit. */
 static void* sys_exit(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   int status = (int)argv[0];
   // Set child process statxus to be the status as well
   exit_and_set_process_status(status);
+  return NULL;
 }
 
 static void* sys_exec(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   const char* cmd_line = (const char*)argv[0];
   is_valid_udata(cmd_line, PGSIZE);
   tid_t proc_res = process_execute(cmd_line);
@@ -217,12 +228,16 @@ static void* sys_exec(int argc, void* argv[]) {
 }
 
 static void* sys_wait(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   tid_t pid = (tid_t)argv[0];
   int res = process_wait(pid);
   return (void*)res;
 }
 
 static void* sys_create(int argc, void* argv[]) {
+  if (argc != 2)
+    return NULL;
   const char* file = (const char*)argv[0];
   unsigned initial_size = (unsigned)argv[1];
   is_valid_udata(file, READDIR_MAX_LEN);
@@ -233,16 +248,20 @@ static void* sys_create(int argc, void* argv[]) {
 }
 
 static void* sys_remove(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   const char* file_name = (const char*)argv[0];
   is_valid_udata(file_name, READDIR_MAX_LEN);
   lock_acquire(&global_file_lock);
   bool succ = filesys_remove(file_name);
   lock_release(&global_file_lock);
 
-  return (void*)file_name;
+  return (void*)succ;
 }
 
 static void* sys_open(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   const char* file_name = (const char*)argv[0];
   is_valid_udata(file_name, READDIR_MAX_LEN);
 
@@ -253,29 +272,31 @@ static void* sys_open(int argc, void* argv[]) {
 
   /* Check if file could not be opened. */
   if (file == NULL)
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
 
   /* process_add_file returns -1 if operation didn't work and closes file */
   int pd = process_add_file(file);
 
   if (pd == -1) {
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
   }
 
-  return pd;
+  return (void*)pd;
 }
 
 static void* sys_filesize(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   int fd = (int)argv[0];
   /* If the fd corresponds to input or output files we return 0
     as we don't have file objects for them */
   if (fd < FD_BEGIN)
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
 
   /* For any other case return the size of the file */
   struct file* file = process_get_file(fd);
   if (file == NULL) { /* Return 0 if the file is NULL */
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
   }
   lock_acquire(&global_file_lock);
   int length = file_length(file);
@@ -285,6 +306,8 @@ static void* sys_filesize(int argc, void* argv[]) {
 
 /* read: */
 static void* sys_read(int argc, void* argv[]) {
+  if (argc != 3)
+    return NULL;
   int fd = (int)argv[0];
   void* buffer = argv[1];
   unsigned size = (unsigned)argv[2];
@@ -292,18 +315,18 @@ static void* sys_read(int argc, void* argv[]) {
   is_valid_udata(buffer, size);
 
   if (buffer == NULL) {
-    return SYS_ERROR; // Buffer is NULL so return -1
+    return (void*)SYS_ERROR; // Buffer is NULL so return -1
   }
 
   if (fd == STDOUT_FILENO) {
-    return SYS_ERROR; // Can't read from output file so return -1
+    return (void*)SYS_ERROR; // Can't read from output file so return -1
   }
 
   if (fd == STDIN_FILENO) {
     for (uint32_t i = 0; i < size; i++) {
       ((char*)buffer)[i] = input_getc();
     }
-    return size;
+    return (void*)size;
   }
 
   /* Otherwise write to the file from the position specified
@@ -311,7 +334,7 @@ static void* sys_read(int argc, void* argv[]) {
   struct file* file = process_get_file(fd);
 
   if (file == NULL)
-    return SYS_ERROR; // If no file is found with given fd return -1
+    return (void*)SYS_ERROR; // If no file is found with given fd return -1
 
   lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
@@ -324,6 +347,9 @@ static void* sys_read(int argc, void* argv[]) {
 /* write: size number of bytes from buffer to fd */
 static void* sys_write(int argc, void* argv[]) {
 
+  if (argc != 3)
+    return NULL;
+
   int fd = (int)argv[0];
   void* buffer = argv[1];
   unsigned size = (unsigned)argv[2];
@@ -331,11 +357,11 @@ static void* sys_write(int argc, void* argv[]) {
   is_valid_udata(buffer, size);
 
   if (buffer == NULL) {
-    return (void*)(intptr_t)NO_WRITE;
+    return (void*)NO_WRITE;
   }
 
   if (fd == STDIN_FILENO) {
-    return (void*)(intptr_t)NO_WRITE; // Can't write to input file so return 0
+    return (void*)NO_WRITE; // Can't write to input file so return 0
   }
 
   if (fd == STDOUT_FILENO) {
@@ -345,26 +371,27 @@ static void* sys_write(int argc, void* argv[]) {
       putbuf((char*)buffer + i, BUFFER_WRITE_SIZE);
     }
     putbuf(buffer + i, size - i);
-    return (void*)(intptr_t)size;
+    return (void*)size;
   }
 
   /* Otherwise write to the file from the position specified
      in it's properties */
   struct file* file = process_get_file(fd);
   if (file == NULL)
-    return (
-        void*)(intptr_t)NO_WRITE; // If no file is found with given fd return 0
+    return (void*)NO_WRITE; // If no file is found with given fd return 0
   lock_acquire(&global_file_lock);
 
   unsigned offset = file_tell(file);
   int bytes_written = file_write_at(file, buffer, size, offset);
   lock_release(&global_file_lock);
 
-  return (void*)(intptr_t)bytes_written;
+  return (void*)bytes_written;
 }
 
 /* seek: */
 static void* sys_seek(int argc, void* argv[]) {
+  if (argc != 2)
+    return NULL;
   /* If the fd corresponds to input or output files we return
     as we don't have file objects for them */
 
@@ -387,6 +414,8 @@ static void* sys_seek(int argc, void* argv[]) {
 }
 
 static void* sys_tell(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   /* If the fd corresponds to input or output files we return 0
      as we don't have file objects for them */
 
@@ -410,6 +439,8 @@ static void* sys_tell(int argc, void* argv[]) {
 }
 
 static void* sys_close(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
   /* If the fd corresponds to input or output files we return
      as we can't close them */
 

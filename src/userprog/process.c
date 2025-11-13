@@ -22,6 +22,7 @@
 static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static char** parse_cmd_line(const char*, int*);
 
 /* Hash calculation function for child processes hashmap. */
 static unsigned hash_child_process(const struct hash_elem* e,
@@ -65,7 +66,7 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
-char** parse_cmd_line(const char* cmd_line, int* argc) {
+static char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* copy = palloc_get_page(0);
   ASSERT(copy != NULL);
 
@@ -74,7 +75,6 @@ char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* save_ptr;
   char* token;
 
-  token = strtok_r(copy, " ", &save_ptr);
   int count = 0;
 
   for (token = strtok_r(copy, " ", &save_ptr); token != NULL;
@@ -83,7 +83,7 @@ char** parse_cmd_line(const char* cmd_line, int* argc) {
 
   *argc = count;
 
-  char** argv[*argc];
+  char** argv = malloc(sizeof(char*) * *argc);
   char *save_ptr_ii;
   strlcpy(copy, cmd_line, PGSIZE);
 
@@ -120,7 +120,7 @@ process_execute (const char *cmd_line)
     return TID_ERROR;
   }
 
-  struct child_process* child_p;
+  struct child_process* child_p = malloc(sizeof(struct child_process));
   child_p->pid = (pid_t)tid;
   child_p->exit_status = PROC_ERR;
   child_p->has_exited = false;
@@ -159,9 +159,15 @@ process_init (struct thread *t)
   return true;
 }
 
-static void push_data(void** esp, const void* data, size_t bytes) {
+static void push_pointer_data(void** esp, const void* data, size_t bytes) {
   *esp -= bytes;
-  memcpy(*esp, data, bytes);
+  memcpy(*esp, &data, bytes);
+}
+
+static void push_string_data(void** esp, const char* sdata) {
+  size_t bytes = strlen(sdata) + 1;
+  *esp -= bytes;
+  strlcpy(*esp, sdata, bytes);
 }
 
 static void push_null(void** esp) {
@@ -181,23 +187,23 @@ static bool push_arguments(void** esp, char** argv, int argc) {
   char* arg_addrs[argc];
 
   for (int i = argc - 1; i >= 0; i--) {
-    size_t len = strlen(argv[i]) + 1;
-    push_data(esp, argv[i], len);
+    push_string_data(esp, argv[i]);
     arg_addrs[i] = *esp;
   }
 
-  align_stack(esp, 8);
+  align_stack(esp, 4);
+  // *esp = (void*)((uintptr_t)(*esp) & ~(4 - 1));
 
   push_null(esp);
 
   for (int i = argc - 1; i >= 0; i--) {
-    push_data(esp, &arg_addrs[i], sizeof(char*));
+    push_pointer_data(esp, arg_addrs[i], sizeof(char*));
   }
 
   char** argv_addr = *esp;
-  push_data(esp, &argv_addr, sizeof(char**));
+  push_pointer_data(esp, &argv_addr, sizeof(char**));
 
-  push_data(esp, &argc, sizeof(int));
+  push_pointer_data(esp, (void*)argc, sizeof(int));
   push_null(esp);
 
   return true;
@@ -209,6 +215,10 @@ static void start_process(void* args_) {
   // char* argv = malloc(PGSIZE / sizeof(char*));
   int argc = 0;
   char** argv = parse_cmd_line(args_, &argc);
+  printf("argc: %d\n", argc);
+  for (int i = 0; i < argc; i++) {
+    printf("argv[%d]: %s\n", i, argv[i]);
+  }
   struct thread *cur = thread_current ();
   char *file_name = args_;
   struct intr_frame if_;
@@ -217,34 +227,36 @@ static void start_process(void* args_) {
   /* Initialise process. */
   success = process_init (cur);
 
-  if (success)
-    {
-      /* Initialize interrupt frame and load executable. */
-      memset (&if_, 0, sizeof if_);
-      if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-      if_.cs = SEL_UCSEG;
-      if_.eflags = FLAG_IF | FLAG_MBS;
-      success = load(argv[0], &if_.eip, &if_.esp);
-      if (success) {
-        success = push_arguments(&if_.esp, argv, argc);
-      }
+  if (success) {
+    /* Initialize interrupt frame and load executable. */
+    memset(&if_, 0, sizeof if_);
+    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
+    success = load(argv[0], &if_.eip, &if_.esp);
+    if (success) {
+      success = push_arguments(&if_.esp, argv, argc);
     }
+  }
 
-  /* After loading, we are done with the command-line copy passed to us by process_execute. */
-  palloc_free_page (file_name);
-  
+  free(argv);
+
+  /* After loading, we are done with the command-line copy passed to us by
+   * process_execute. */
+  palloc_free_page(file_name);
+
   /* If load failed, terminate the process. */
-  if (!success) 
-    process_exit (PROC_ERR);
+  if (!success)
+    process_exit(PROC_ERR);
 
   /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  NOT_REACHED ();
+      interrupt, implemented by intr_exit (in
+      threads/intr-stubs.S).  Because intr_exit takes all of its
+      arguments on the stack in the form of a `struct intr_frame',
+      we just point the stack pointer (%esp) to our stack frame
+      and jump to it. */
+  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+  NOT_REACHED();
 }
 
 /* Waits for thread TID to die and returns its exit status. 
@@ -665,7 +677,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
@@ -734,7 +746,7 @@ process_add_file(struct file *f)
 void
 process_close_file(int fd)
 {
-  if (fd == NULL)
+  if (fd == NULL || fd == 0)
     return;
 
   struct process *cur = thread_current ()->process;
