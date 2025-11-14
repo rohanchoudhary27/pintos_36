@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 
+// Define the number of bits used to represent a system call number.
+// In Pintos, system call numbers are stored as 32-bit integers.
 #define SYSCALL_NUMBER_BITS 32
 
 static void* sys_halt(int argc, void* argv[] UNUSED);
@@ -39,10 +41,14 @@ static void is_valid_uaddr(const void*);
 static void exit_and_set_process_status(int);
 static void* get_syscall_arg_addr(void*, int);
 
+// Descriptor for a system call in Pintos.
+// Each system call is described by the number of arguments it takes,
+// whether it returns a value, and the function that implements it.
 struct syscall_descriptor {
-  int argc;
-  int is_return_void;
-  syscall_f sys_func;
+  int argc;           // Number of arguments the system call expects.
+  int is_return_void; // 1 if the syscall does not return a value else 0
+  syscall_f
+      sys_func; // Pointer to the function that implements the system call.
 };
 
 static struct syscall_descriptor syscall_map[] = {
@@ -87,11 +93,14 @@ static struct syscall_descriptor syscall_map[] = {
     [SYS_CLOSE] = {
         .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_close}};
 
+// Initializes the system call interface in Pintos.
 void syscall_init(void) {
   lock_init(&global_file_lock);
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+// Handles a system call invoked by a user program.
+// 'f' contains the user program's CPU state at the time of the syscall.
 static void syscall_handler(struct intr_frame* f) {
   int syscall_no = get_syscall_number_from_frame(f);
   int num_syscall_funcs = sizeof(syscall_map) / sizeof(syscall_map[0]);
@@ -123,6 +132,10 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
   return syscall_no;
 }
 
+/*
+ * Checks that a user string is valid.
+ * Loops through each character until '\0'.
+ */
 static void validate_string(const char* s) {
   for (;;) {
     is_valid_uaddr(s); // Make sure this *char* is accessible
@@ -133,6 +146,11 @@ static void validate_string(const char* s) {
   }
 }
 
+/*
+ * Checks if a user-supplied address is valid and mapped.
+ * Terminates the process if the address is NULL, not in user space,
+ * or not mapped in the page directory.
+ */
 static void is_valid_uaddr(const void* addr) {
 
   struct thread* current_thread = thread_current();
@@ -145,6 +163,10 @@ static void is_valid_uaddr(const void* addr) {
   }
 }
 
+/*
+ * Validates that a block of user memory is accessible.
+ * Checks each page in the range [data_addr, data_addr + size).
+ */
 static void is_valid_udata(const void* data_addr, unsigned size) {
   uintptr_t addrptr = (uintptr_t)data_addr;
   unsigned i = 0;
@@ -163,14 +185,6 @@ static void exit_and_set_process_status(int status) {
 
   lock_acquire(&curr_thread->process->process_lock);
   curr_thread->process->exit_status = status;
-  // struct hash children_hashmap = curr_thread->process->children;
-  // struct hash_iterator i;
-  // hash_first(&i, &children_hashmap);
-  // while (hash_next(&i)) {
-  //   struct child_process* cp =
-  //       hash_entry(hash_cur(&i), struct child_process, elem);
-  //   cp->exit_status = status;
-  // }
   lock_release(&curr_thread->process->process_lock);
   process_exit(status);
 }
@@ -212,6 +226,11 @@ static void* sys_exit(int argc, void* argv[]) {
   return NULL;
 }
 
+/*
+ * Executes a new process specified by a command line.
+ * Validates the command string and waits for the child to load.
+ * Returns the child process ID on success, or SYS_ERROR on failure.
+ */
 static void* sys_exec(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
@@ -242,6 +261,10 @@ static void* sys_exec(int argc, void* argv[]) {
   return (void*)proc_res;
 }
 
+/*
+ * Waits for a child process to finish.
+ * Takes the child process ID as argument and returns its exit status.
+ */
 static void* sys_wait(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
@@ -250,23 +273,35 @@ static void* sys_wait(int argc, void* argv[]) {
   return (void*)res;
 }
 
+/*
+ * Creates a new file with the given name and initial size.
+ * Returns true on success, false on failure.
+ */
 static void* sys_create(int argc, void* argv[]) {
   if (argc != 2)
     return NULL;
   const char* file_name = (const char*)argv[0];
   unsigned initial_size = (unsigned)argv[1];
+  // Validate that the file name string is safe
   validate_string(file_name);
+  // Acquire global file system lock to prevent race conditions
   lock_acquire(&global_file_lock);
   bool succ = filesys_create(file_name, initial_size);
   lock_release(&global_file_lock);
   return (void*)succ;
 }
 
+/*
+ * Removes a file with the given name from the file system.
+ * Returns true on success, false on failure.
+ */
 static void* sys_remove(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
   const char* file_name = (const char*)argv[0];
+  // Validate that the file name string is safe
   validate_string(file_name);
+  // Acquire global file system lock to prevent race conditions
   lock_acquire(&global_file_lock);
   bool succ = filesys_remove(file_name);
   lock_release(&global_file_lock);
@@ -274,6 +309,10 @@ static void* sys_remove(int argc, void* argv[]) {
   return (void*)succ;
 }
 
+/*
+ * Opens a file with the given name.
+ * Returns the file descriptor on success, or SYS_ERROR on failure.
+ */
 static void* sys_open(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
@@ -299,6 +338,10 @@ static void* sys_open(int argc, void* argv[]) {
   return (void*)pd;
 }
 
+/*
+ * Returns the size of a file given its file descriptor.
+ * Returns SYS_ERROR if the descriptor is invalid or not associated with a file.
+ */
 static void* sys_filesize(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
@@ -313,13 +356,17 @@ static void* sys_filesize(int argc, void* argv[]) {
   if (file == NULL) { /* Return 0 if the file is NULL */
     return (void*)SYS_ERROR;
   }
+  // Acquire global file system lock to prevent race conditions
   lock_acquire(&global_file_lock);
   int length = file_length(file);
   lock_release(&global_file_lock);
   return (void*)length;
 }
 
-/* read: */
+/*
+ * Reads data from a file or standard input into a buffer.
+ * Returns the number of bytes read, or SYS_ERROR on failure.
+ */
 static void* sys_read(int argc, void* argv[]) {
   if (argc != 3)
     return NULL;
@@ -426,6 +473,11 @@ static void* sys_seek(int argc, void* argv[]) {
   return NULL;
 }
 
+/*
+ * Returns the current position (offset) in a file given its descriptor.
+ * Returns SYS_TELL_NOT_FOUND if the descriptor is invalid or not associated
+ * with a file.
+ */
 static void* sys_tell(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
@@ -451,6 +503,10 @@ static void* sys_tell(int argc, void* argv[]) {
   return (void*)(unsigned)offset;
 }
 
+/*
+ * Closes a file given its file descriptor.
+ * Does nothing for standard input/output descriptors.
+ */
 static void* sys_close(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
