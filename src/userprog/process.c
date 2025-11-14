@@ -69,6 +69,14 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
+/* Splits a command-line string into an array of argument tokens.
+   The function copies the input command line into kernel memory,
+   counts how many space-separated arguments it contains, allocates
+   an argv array of that size, and then extracts each argument into
+   the array. It returns the argv array and writes the argument count
+   into *argc. The returned argv contains pointers to the tokens within
+   the copied command-line buffer.
+*/
 static char** parse_cmd_line(const char* cmd_line, int* argc) {
   char* copy = palloc_get_page(0);
   ASSERT(copy != NULL);
@@ -94,6 +102,7 @@ static char** parse_cmd_line(const char* cmd_line, int* argc) {
   for (token = strtok_r(copy, " ", &save_ptr_ii); token != NULL;
        token = strtok_r(NULL, " ", &save_ptr_ii))
     argv[i++] = token;
+  palloc_free_page(copy);
   return argv;
 }
 
@@ -178,22 +187,45 @@ process_init (struct thread *t)
   return true;
 }
 
+/* Pushes a pointer value onto the user stack.
+   Decrements the stack pointer by the given byte size and copies
+   the pointer-sized data into the new stack location. This is used
+   to place addresses (such as argv pointers) onto the user stack
+   during process setup.
+*/
 static void push_pointer_data(void** esp, const void* data, size_t bytes) {
   *esp -= bytes;
   memcpy(*esp, &data, bytes);
 }
 
+/* Pushes a null-terminated string onto the user stack.
+   The function calculates the string’s length (including the
+   terminating null byte), moves the stack pointer down by that
+   amount, and copies the string into the new stack space. This is
+   used when placing argument strings on the user stack during
+   process setup.
+*/
 static void push_string_data(void** esp, const char* sdata) {
   size_t bytes = strlen(sdata) + 1;
   *esp -= bytes;
   strlcpy(*esp, sdata, bytes);
 }
 
+/* Pushes a NULL pointer onto the user stack.
+   Moves the stack pointer down by the size of a pointer and writes
+   a zeroed pointer value at that location. Used to terminate the
+   argv array on the user stack.
+*/
 static void push_null(void** esp) {
   *esp -= sizeof(void*);
   memset(*esp, 0, sizeof(void*));
 }
 
+/* Ensures the user stack pointer is aligned to the given boundary.
+   If the stack pointer is not already aligned, it is adjusted downward
+   by the required number of bytes, and the padding space is zeroed.
+   Proper alignment is required for user program startup conventions.
+*/
 static void align_stack(void** esp, size_t align) {
   uintptr_t misalign = (uintptr_t)(*esp) % align;
   if (misalign != 0) {
@@ -202,6 +234,8 @@ static void align_stack(void** esp, size_t align) {
   }
 }
 
+/* Copies the program's command-line arguments onto the user stack in the
+   format expected by the PintOS process start-up convention. */
 static bool push_arguments(void** esp, char** argv, int argc) {
   char* arg_addrs[argc];
 
@@ -278,6 +312,7 @@ static void start_process(void* args_) {
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
   palloc_free_page (file_name);
+  palloc_free_page(args_);
   free(argv);
   /* If load failed, terminate the process. */
   if (!success)
