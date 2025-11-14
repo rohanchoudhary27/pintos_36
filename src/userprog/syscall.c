@@ -123,6 +123,16 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
   return syscall_no;
 }
 
+static void validate_string(const char* s) {
+  for (;;) {
+    is_valid_uaddr(s); // Make sure this *char* is accessible
+    if (*s == '\0') {
+      break;
+    }
+    s++;
+  }
+}
+
 static void is_valid_uaddr(const void* addr) {
 
   struct thread* current_thread = thread_current();
@@ -139,7 +149,7 @@ static void is_valid_udata(const void* data_addr, unsigned size) {
   uintptr_t addrptr = (uintptr_t)data_addr;
   unsigned i = 0;
   while (i < size) {
-    is_valid_uaddr((void*)addrptr);
+    is_valid_uaddr((void*)addrptr + i);
     unsigned move_ptr_by = PGSIZE - ((uintptr_t)(addrptr + i) % PGSIZE);
     i += move_ptr_by < (size - i) ? move_ptr_by : (size - i);
   }
@@ -206,7 +216,7 @@ static void* sys_exec(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
   const char* cmd_line = (const char*)argv[0];
-  is_valid_udata(cmd_line, PGSIZE);
+  validate_string(cmd_line);
   tid_t proc_res = process_execute(cmd_line);
   // wait for child process
   struct thread* current_thread = thread_current();
@@ -243,11 +253,11 @@ static void* sys_wait(int argc, void* argv[]) {
 static void* sys_create(int argc, void* argv[]) {
   if (argc != 2)
     return NULL;
-  const char* file = (const char*)argv[0];
+  const char* file_name = (const char*)argv[0];
   unsigned initial_size = (unsigned)argv[1];
-  is_valid_udata(file, READDIR_MAX_LEN);
+  validate_string(file_name);
   lock_acquire(&global_file_lock);
-  bool succ = filesys_create (file, initial_size);
+  bool succ = filesys_create(file_name, initial_size);
   lock_release(&global_file_lock);
   return (void*)succ;
 }
@@ -256,7 +266,7 @@ static void* sys_remove(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
   const char* file_name = (const char*)argv[0];
-  is_valid_udata(file_name, READDIR_MAX_LEN);
+  validate_string(file_name);
   lock_acquire(&global_file_lock);
   bool succ = filesys_remove(file_name);
   lock_release(&global_file_lock);
@@ -268,7 +278,7 @@ static void* sys_open(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
   const char* file_name = (const char*)argv[0];
-  is_valid_udata(file_name, READDIR_MAX_LEN);
+  validate_string(file_name);
 
   /* Open file in file system. */
   lock_acquire(&global_file_lock);
