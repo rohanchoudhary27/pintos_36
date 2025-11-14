@@ -113,12 +113,15 @@ process_execute (const char *cmd_line)
   if (cmd_line_copy == NULL)
     return TID_ERROR;
   strlcpy (cmd_line_copy, cmd_line, PGSIZE);
-
+  int argc;
+  char** argv = parse_cmd_line(cmd_line_copy, &argc);
   /* Create a new thread to execute CMD_LINE. */
   enum intr_level old_level = intr_disable();
-  tid = thread_create (cmd_line, PRI_DEFAULT, start_process, cmd_line_copy);
+  tid = thread_create(argv[0], PRI_DEFAULT, start_process, cmd_line_copy);
+
   if (tid == TID_ERROR) {
     palloc_free_page (cmd_line_copy);
+    free(argv);
     intr_set_level(old_level);
     return TID_ERROR;
   }
@@ -137,11 +140,13 @@ process_execute (const char *cmd_line)
   hash_insert(&cur->process->children, &child_p->elem);
 
   struct thread* child_thread = thread_get_by_tid(tid);
-  if (child_thread != NULL && child_thread->process != NULL) {
-    child_thread->process->parent = cur->process;
-    child_thread->process->child = child_p;
-  }
+  child_thread->child_info = child_p;
+  // if (child_thread != NULL) {
+  //   child_thread->process->parent = cur->process;
+  //   child_thread->process->child = child_p;
+  // }
   intr_set_level(old_level);
+  free(argv);
   return tid;
 }
 
@@ -157,8 +162,8 @@ process_init (struct thread *t)
   /* Initialise process attributes. */
   process->pagedir = NULL;
   process->thread = t;
-  process->parent = NULL;
-  process->child = NULL;
+  // process->parent = NULL;
+  // process->child = NULL;
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
   process->exit_status = PROC_ERR;
@@ -228,6 +233,7 @@ static bool push_arguments(void** esp, char** argv, int argc) {
 static void start_process(void* args_) {
 
   // size of stack to check for overflow
+  // char** argv = args_;
   size_t size_stack = BYTE_SIZE * sizeof(void*);
 
   // size_t max_args = (strlen(args_) + 1) / 2;
@@ -238,25 +244,17 @@ static void start_process(void* args_) {
   // size_t max_of_args = count_max_args > max_args ? count_max_args : max_args;
   // char** argv = malloc(max_of_args * sizeof(char*));
 
-  bool success = true;
-
   // if (argv == NULL) {
   //   success = false; // This needs to be some other error
   // }
 
   int argc = 0;
   char** argv = parse_cmd_line(args_, &argc);
-  printf("argc: %d\n", argc);
-  for (int i = 0; i < argc; i++) {
-    printf("argv[%d]: %s\n", i, argv[i]);
-  }
   struct thread *cur = thread_current ();
   char *file_name = args_;
   struct intr_frame if_;
 
-  if (success) {
-    success = process_init(cur);
-  }
+  bool success = process_init(cur);
 
   if (success)
     {
@@ -361,24 +359,25 @@ static void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
 void
 process_exit (int exit_code UNUSED)
 {
-  struct process *cur = thread_current ()->process;
+  struct thread* t = thread_current();
+  struct process* cur = t->process;
 
   bool flag_free = false;
 
   /* telling parent child has exited and frees child_process if parent also
    dead*/
-  if (cur->child != NULL) {
-    lock_acquire(&cur->child->exit_lock);
-    sema_up(&cur->child->wait_sema);
-    if (cur->child->has_parent) {
-      cur->child->exists = false;
+  if (t->child_info != NULL) {
+    lock_acquire(&t->child_info->exit_lock);
+    sema_up(&t->child_info->wait_sema);
+    if (t->child_info->has_parent) {
+      t->child_info->exists = false;
       // sema_up(&cur->child->wait_sema);
     } else {
       flag_free = true;
     }
-    lock_release(&cur->child->exit_lock);
+    lock_release(&t->child_info->exit_lock);
     if (flag_free) {
-      free(cur->child);
+      free(t->child_info);
     }
   }
 
