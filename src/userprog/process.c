@@ -244,6 +244,19 @@ static void align_stack(void** esp, size_t align) {
 /* Copies the program's command-line arguments onto the user stack in the
    format expected by the PintOS process start-up convention. */
 static bool push_arguments(void** esp, char** argv, int argc) {
+  size_t total_arg_size = 0;
+  for (int i = 0; i < argc; i++) {
+    total_arg_size += strlen(argv[i]) + 1;
+  }
+
+  total_arg_size += 3;
+  total_arg_size += sizeof(void*) + (argc * sizeof(char*)) + sizeof(char**) +
+                    sizeof(int) + sizeof(void*);
+
+  if (total_arg_size > PGSIZE) {
+    return false; // Too large, fail gracefully
+  }
+
   char* arg_addrs[argc];
 
   for (int i = argc - 1; i >= 0; i--) {
@@ -251,7 +264,7 @@ static bool push_arguments(void** esp, char** argv, int argc) {
     arg_addrs[i] = *esp;
   }
 
-  align_stack(esp, 4);
+  align_stack(esp, BYTE_SIZE);
   // *esp = (void*)((uintptr_t)(*esp) & ~(4 - 1));
 
   push_null(esp);
