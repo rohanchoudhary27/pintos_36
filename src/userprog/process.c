@@ -186,10 +186,6 @@ process_execute (const char *cmd_line)
 
   struct thread* child_thread = thread_get_by_tid(tid);
   child_thread->child_info = child_p;
-  // if (child_thread != NULL) {
-  //   child_thread->process->parent = cur->process;
-  //   child_thread->process->child = child_p;
-  // }
   intr_set_level(old_level);
   for (int i = 0; i < argc; i++)
     free(argv[i]);
@@ -209,8 +205,6 @@ process_init (struct thread *t)
   /* Initialise process attributes. */
   process->pagedir = NULL;
   process->thread = t;
-  // process->parent = NULL;
-  // process->child = NULL;
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
   process->exit_status = PROC_ERR;
@@ -296,7 +290,6 @@ static bool push_arguments(void** esp, char** argv, int argc) {
   }
 
   align_stack(esp, BYTE_SIZE);
-  // *esp = (void*)((uintptr_t)(*esp) & ~(4 - 1));
 
   push_null(esp);
 
@@ -317,21 +310,7 @@ static bool push_arguments(void** esp, char** argv, int argc) {
    running. */
 static void start_process(void* args_) {
 
-  // size of stack to check for overflow
-  // char** argv = args_;
   size_t size_stack = BYTE_SIZE * sizeof(void*);
-
-  // size_t max_args = (strlen(args_) + 1) / 2;
-
-  // size_t count_max_args =
-  //     (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
-
-  // size_t max_of_args = count_max_args > max_args ? count_max_args : max_args;
-  // char** argv = malloc(max_of_args * sizeof(char*));
-
-  // if (argv == NULL) {
-  //   success = false; // This needs to be some other error
-  // }
 
   int argc = 0;
   char** argv = parse_cmd_line(args_, &argc);
@@ -462,7 +441,6 @@ process_exit (int exit_code UNUSED)
     sema_up(&t->child_info->wait_sema);
     if (t->child_info->has_parent) {
       t->child_info->exists = false;
-      // sema_up(&cur->child->wait_sema);
     } else {
       flag_free = true;
     }

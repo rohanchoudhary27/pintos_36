@@ -24,7 +24,6 @@ struct process {
   struct lock process_lock;   /* Per process lock. */
   struct semaphore wait_sema; /* Semaphore for the children processes the
                                  process is waiting for. */
-  // struct child_process* child;
 };
 
 struct child_process {
@@ -34,10 +33,8 @@ struct child_process {
   struct semaphore wait_sema;
   struct lock exit_lock;
   struct hash_elem elem;
-
   bool exists; // if child exists
   bool has_parent;
-
   bool load_success;
   struct semaphore load_semaphore; // Should be initialized to
 };
