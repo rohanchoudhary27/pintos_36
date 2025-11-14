@@ -123,12 +123,9 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
   return syscall_no;
 }
 
-// TODO: implement buffer/string check as well. The lecture recording
-// suggests that you first check the buffer start address, if it's good,
-// check its end address as well.
 static void is_valid_uaddr(const void* addr) {
-  void* phy_addr = pagedir_get_page(thread_current()->process->pagedir, addr);
-  if (addr == NULL || !is_user_vaddr(addr) || phy_addr == NULL) {
+  if (addr == NULL || !is_user_vaddr(addr) ||
+      pagedir_get_page(thread_current()->process->pagedir, addr) == NULL) {
     exit_and_set_process_status(PROC_ERR);
   }
 }
@@ -155,14 +152,14 @@ static void exit_and_set_process_status(int status) {
 
   lock_acquire(&curr_thread->process->process_lock);
   curr_thread->process->exit_status = status;
-  struct hash children_hashmap = curr_thread->process->children;
-  struct hash_iterator i;
-  hash_first(&i, &children_hashmap);
-  while (hash_next(&i)) {
-    struct child_process* cp =
-        hash_entry(hash_cur(&i), struct child_process, elem);
-    cp->exit_status = status;
-  }
+  // struct hash children_hashmap = curr_thread->process->children;
+  // struct hash_iterator i;
+  // hash_first(&i, &children_hashmap);
+  // while (hash_next(&i)) {
+  //   struct child_process* cp =
+  //       hash_entry(hash_cur(&i), struct child_process, elem);
+  //   cp->exit_status = status;
+  // }
   lock_release(&curr_thread->process->process_lock);
   process_exit(status);
 }
@@ -199,6 +196,7 @@ static void* sys_exit(int argc, void* argv[]) {
     return NULL;
   int status = (int)argv[0];
   // Set child process statxus to be the status as well
+  thread_current()->child_info->exit_status = status;
   exit_and_set_process_status(status);
   return NULL;
 }
@@ -224,7 +222,7 @@ static void* sys_exec(int argc, void* argv[]) {
   }
   struct child_process* child_p =
       hash_entry(child_hash, struct child_process, elem);
-  sema_down(&child_p->wait_sema);
+  sema_down(&child_p->load_semaphore);
   return (void*)proc_res;
 }
 

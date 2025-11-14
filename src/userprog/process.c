@@ -144,7 +144,7 @@ process_execute (const char *cmd_line)
   child_p->has_parent = true; /* Parent exists initially */
 
   lock_init(&child_p->exit_lock);
-  cond_init(&child_p->load_condition);
+  sema_init(&child_p->load_semaphore, 0);
   sema_init(&child_p->wait_sema, 0);
   hash_insert(&cur->process->children, &child_p->elem);
 
@@ -309,6 +309,7 @@ static void start_process(void* args_) {
   if (size_stack > PGSIZE) {
     success = false;
   }
+  sema_up(&cur->child_info->load_semaphore);
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
   palloc_free_page(file_name);
