@@ -30,13 +30,13 @@ struct child_process {
   pid_t pid;       /*The tid of the child. */
   int exit_status; /* Exit status of child. */
   bool has_exited; /* Flag for whether child process has exited. */
-  struct semaphore wait_sema;
-  struct lock exit_lock;
-  struct hash_elem elem;
-  bool exists; // if child exists
-  bool has_parent;
-  bool load_success;
-  struct semaphore load_semaphore; // Should be initialized to
+  struct semaphore wait_sema; // Semaphore used for parent waitng on child exit
+  struct lock exit_lock;      // Lock to protect exit status
+  struct hash_elem elem;      // Element for storing in the hash table
+  bool exists;                // if child exists
+  bool has_parent;            // true if child has parent process
+  bool load_success;          // true if child loaded succesfully
+  struct semaphore load_semaphore; // Used to wait for child loading
 };
 
 void root_process_init(void);

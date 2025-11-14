@@ -144,7 +144,6 @@ main (void)
   /* Finish up. */
   shutdown ();
 #ifdef USERPROG
-
   process_exit (PROC_SUCC);
 #else
   thread_exit ();
