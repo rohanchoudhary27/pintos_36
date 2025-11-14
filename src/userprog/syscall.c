@@ -352,8 +352,7 @@ static void* sys_read(int argc, void* argv[]) {
     return (void*)SYS_ERROR; // If no file is found with given fd return -1
 
   lock_acquire(&global_file_lock);
-  unsigned offset = file_tell(file);
-  int bytes_read = file_read_at(file, buffer, size, offset);
+  int bytes_read = file_read(file, buffer, size);
   lock_release(&global_file_lock);
 
   return (void*)bytes_read;
@@ -394,10 +393,9 @@ static void* sys_write(int argc, void* argv[]) {
   struct file* file = process_get_file(fd);
   if (file == NULL)
     return (void*)NO_WRITE; // If no file is found with given fd return 0
-  lock_acquire(&global_file_lock);
 
-  unsigned offset = file_tell(file);
-  int bytes_written = file_write_at(file, buffer, size, offset);
+  lock_acquire(&global_file_lock);
+  int bytes_written = file_write(file, buffer, size);
   lock_release(&global_file_lock);
 
   return (void*)bytes_written;
