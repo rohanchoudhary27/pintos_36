@@ -124,6 +124,12 @@ process_execute (const char *cmd_line)
   strlcpy (cmd_line_copy, cmd_line, PGSIZE);
   int argc;
   char** argv = parse_cmd_line(cmd_line_copy, &argc);
+
+  int count_max_args =
+      (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
+  if (argc > count_max_args) {
+    return TID_ERROR;
+  }
   /* Create a new thread to execute CMD_LINE. */
   enum intr_level old_level = intr_disable();
   tid = thread_create(argv[0], PRI_DEFAULT, start_process, cmd_line_copy);
