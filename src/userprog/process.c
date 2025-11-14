@@ -314,6 +314,7 @@ static void start_process(void* args_) {
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
   palloc_free_page (file_name);
+  palloc_free_page(args_);
   free(argv);
   /* If load failed, terminate the process. */
   if (!success)
