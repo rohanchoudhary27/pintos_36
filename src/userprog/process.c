@@ -369,9 +369,10 @@ process_exit (int exit_code UNUSED)
    dead*/
   if (cur->child != NULL) {
     lock_acquire(&cur->child->exit_lock);
+    sema_up(&cur->child->wait_sema);
     if (cur->child->has_parent) {
       cur->child->exists = false;
-      sema_up(&cur->child->wait_sema);
+      // sema_up(&cur->child->wait_sema);
     } else {
       flag_free = true;
     }
@@ -427,12 +428,9 @@ process_exit (int exit_code UNUSED)
         }
   
       /* Finally, destroy the current process's struct */
-      printf("<%s>: exit(%d)\n", thread_current()->name, exit_code);
-      thread_current()->process = NULL;
-      free(cur);
-
-      // TODO: do hash_destroy() also implement a way to destroy the
-      // child_processes
+        printf("%s: exit(%d)\n", thread_current()->name, exit_code);
+        thread_current()->process = NULL;
+        free(cur);
     }
     
   /* Now terminate the thread underlying this process. */
