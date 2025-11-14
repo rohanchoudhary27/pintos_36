@@ -95,14 +95,32 @@ static char** parse_cmd_line(const char* cmd_line, int* argc) {
   *argc = count;
 
   char** argv = malloc(sizeof(char*) * *argc);
-  char *save_ptr_ii;
-  strlcpy(copy, cmd_line, PGSIZE);
+  if (argv == NULL) {
+    palloc_free_page(copy);
+    return NULL;
+  }
 
+  strlcpy(copy, cmd_line, PGSIZE);
+  char* save_ptr_ii;
   int i = 0;
   for (token = strtok_r(copy, " ", &save_ptr_ii); token != NULL;
-       token = strtok_r(NULL, " ", &save_ptr_ii))
-    argv[i++] = token;
-  // palloc_free_page(copy);
+       token = strtok_r(NULL, " ", &save_ptr_ii)) {
+    size_t len = strlen(token) + 1;
+    argv[i] = malloc(len);
+    if (argv[i] == NULL) {
+      /* roll back partial allocations to avoid leaks */
+      for (int j = 0; j < i; j++) {
+        free(argv[j]);
+      }
+      free(argv);
+      palloc_free_page(copy);
+      return NULL;
+    }
+    strlcpy(argv[i], token, len);
+    i++;
+  }
+
+  palloc_free_page(copy);
   return argv;
 }
 
@@ -122,12 +140,21 @@ process_execute (const char *cmd_line)
   if (cmd_line_copy == NULL)
     return TID_ERROR;
   strlcpy (cmd_line_copy, cmd_line, PGSIZE);
+
   int argc;
   char** argv = parse_cmd_line(cmd_line_copy, &argc);
+  if (argv == NULL) {
+    palloc_free_page(cmd_line_copy);
+    return TID_ERROR;
+  }
 
   int count_max_args =
       (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
   if (argc > count_max_args) {
+    palloc_free_page(cmd_line_copy);
+    for (int i = 0; i < argc; i++)
+      free(argv[i]);
+    free(argv);
     return TID_ERROR;
   }
   /* Create a new thread to execute CMD_LINE. */
@@ -136,6 +163,8 @@ process_execute (const char *cmd_line)
 
   if (tid == TID_ERROR) {
     palloc_free_page (cmd_line_copy);
+    for (int i = 0; i < argc; i++)
+      free(argv[i]);
     free(argv);
     intr_set_level(old_level);
     return TID_ERROR;
@@ -162,6 +191,8 @@ process_execute (const char *cmd_line)
   //   child_thread->process->child = child_p;
   // }
   intr_set_level(old_level);
+  for (int i = 0; i < argc; i++)
+    free(argv[i]);
   free(argv);
   return tid;
 }
@@ -334,6 +365,8 @@ static void start_process(void* args_) {
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
   palloc_free_page(file_name);
+  for (int i = 0; i < argc; i++)
+    free(argv[i]);
   free(argv);
   /* If load failed, terminate the process. */
   if (!success)
@@ -391,7 +424,7 @@ static void destroy_children(struct hash_elem* e, void* aux UNUSED) {
 
   bool flag_free = false;
   lock_acquire(&child->exit_lock);
-  /* If child does not exist, since parent is dying, free child_info. */
+  /* If child does not exist, since parent is dying, free child_process. */
   if (child->exists) {
     child->has_parent = false;
   } else {
@@ -407,7 +440,9 @@ static void destroy_children(struct hash_elem* e, void* aux UNUSED) {
 /* Helper func to destroy fd_table */
 static void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
   struct file_desc* fd = hash_entry(element, struct file_desc, elem);
+  lock_acquire(&global_file_lock);
   file_close(fd->file);
+  lock_release(&global_file_lock);
   free(fd);
 }
 
