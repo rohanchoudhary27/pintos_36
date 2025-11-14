@@ -102,7 +102,7 @@ static char** parse_cmd_line(const char* cmd_line, int* argc) {
   for (token = strtok_r(copy, " ", &save_ptr_ii); token != NULL;
        token = strtok_r(NULL, " ", &save_ptr_ii))
     argv[i++] = token;
-  palloc_free_page(copy);
+  // palloc_free_page(copy);
   return argv;
 }
 
@@ -311,8 +311,7 @@ static void start_process(void* args_) {
   }
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
-  palloc_free_page (file_name);
-  palloc_free_page(args_);
+  palloc_free_page(file_name);
   free(argv);
   /* If load failed, terminate the process. */
   if (!success)
