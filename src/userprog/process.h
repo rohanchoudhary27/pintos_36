@@ -38,6 +38,7 @@ struct child_process {
   bool exists; // if child exists
   bool has_parent;
 
+  bool load_success;
   struct semaphore load_semaphore; // Should be initialized to
 };
 

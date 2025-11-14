@@ -145,6 +145,7 @@ process_execute (const char *cmd_line)
   child_p->pid = (pid_t)tid;
   child_p->exit_status = PROC_ERR;
   child_p->has_exited = false;
+  child_p->load_success = false;
 
   child_p->exists = true;     /* Child process exists when created */
   child_p->has_parent = true; /* Parent exists initially */
@@ -304,6 +305,8 @@ static void start_process(void* args_) {
       if_.cs = SEL_UCSEG;
       if_.eflags = FLAG_IF | FLAG_MBS;
       success = load(argv[0], &if_.eip, &if_.esp);
+      cur->child_info->load_success = success;
+      sema_up(&cur->child_info->load_semaphore);
       if (success) {
         success = push_arguments(&if_.esp, argv, argc);
       }
@@ -315,7 +318,6 @@ static void start_process(void* args_) {
   if (size_stack > PGSIZE) {
     success = false;
   }
-  sema_up(&cur->child_info->load_semaphore);
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
   palloc_free_page(file_name);

@@ -124,23 +124,24 @@ static uint32_t get_syscall_number_from_frame(struct intr_frame* f) {
 }
 
 static void is_valid_uaddr(const void* addr) {
-  if (addr == NULL || !is_user_vaddr(addr) ||
-      pagedir_get_page(thread_current()->process->pagedir, addr) == NULL) {
+
+  struct thread* current_thread = thread_current();
+
+  if (addr == NULL || !is_user_vaddr(addr) || current_thread == NULL ||
+      current_thread->process == NULL ||
+      current_thread->process->pagedir == NULL ||
+      pagedir_get_page(current_thread->process->pagedir, addr) == NULL) {
     exit_and_set_process_status(PROC_ERR);
   }
 }
 
 static void is_valid_udata(const void* data_addr, unsigned size) {
   uintptr_t addrptr = (uintptr_t)data_addr;
-  uintptr_t endptr = addrptr + size;
-  uintptr_t pg_boundry = (uintptr_t)pg_round_down(data_addr);
-  while (addrptr < endptr) {
+  unsigned i = 0;
+  while (i < size) {
     is_valid_uaddr((void*)addrptr);
-    pg_boundry += PGSIZE;
-    if (pg_boundry < endptr)
-      addrptr = pg_boundry;
-    else
-      addrptr = endptr;
+    unsigned move_ptr_by = PGSIZE - ((uintptr_t)(addrptr + i) % PGSIZE);
+    i += move_ptr_by < (size - i) ? move_ptr_by : (size - i);
   }
 }
 
@@ -222,7 +223,12 @@ static void* sys_exec(int argc, void* argv[]) {
   }
   struct child_process* child_p =
       hash_entry(child_hash, struct child_process, elem);
+
   sema_down(&child_p->load_semaphore);
+
+  if (!child_p->load_success) {
+    return (void*)SYS_ERROR;
+  }
   return (void*)proc_res;
 }
 
