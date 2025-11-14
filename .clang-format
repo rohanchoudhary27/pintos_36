@@ -1,0 +1,11 @@
+---
+# WARNING: Do NOT run clang format directly
+# Instead use your editors' settings to only modify _changed lines_ as and when you type them!
+#
+# Check what the LLVM style is before using it - you might prefer a different setting instead 
+BasedOnStyle: LLVM
+SortIncludes: true
+IndentWidth: 2
+TabWidth: 2
+PointerAlignment: Left
+IndentCaseLabels: true

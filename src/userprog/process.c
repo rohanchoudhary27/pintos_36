@@ -19,9 +19,43 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define BYTE_SIZE 4
+
 static bool process_init (struct thread *t);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static char** parse_cmd_line(const char*, int*);
+static void destroy_fd_table(struct hash_elem*, void*);
+
+/* child proc hash func */
+static unsigned hash_child_process(const struct hash_elem* e,
+                                   void* aux UNUSED) {
+  struct child_process* child = hash_entry(e, struct child_process, elem);
+  return hash_int(child->pid);
+}
+
+/* child proc hashmap comparision func */
+static bool hash_less_child_process(const struct hash_elem* a,
+                                    const struct hash_elem* b,
+                                    void* aux UNUSED) {
+  struct child_process* child_a = hash_entry(a, struct child_process, elem);
+  struct child_process* child_b = hash_entry(b, struct child_process, elem);
+  return (child_a->pid < child_b->pid);
+}
+
+/* Hash calculation function for file descriptions' hashmap. */
+static unsigned hash_fd_table(const struct hash_elem* e, void* aux UNUSED) {
+  struct file_desc* file_desc = hash_entry(e, struct file_desc, elem);
+  return hash_int(file_desc->fd);
+}
+
+/* Comparison function for file descriptions' hashmap. */
+static bool hash_less_fd_table(const struct hash_elem* a,
+                               const struct hash_elem* b, void* aux UNUSED) {
+  struct file_desc* file_desc_a = hash_entry(a, struct file_desc, elem);
+  struct file_desc* file_desc_b = hash_entry(b, struct file_desc, elem);
+  return (file_desc_a->fd < file_desc_b->fd);
+}
 
 /* Initialises the main thread as a minimal root OS process.
    Note that when this thread/process terminates, the OS will shutdown. */
@@ -35,13 +69,69 @@ root_process_init (void)
     PANIC("Unable to initialise root OS process.");
 }
 
+/* Splits a command-line string into an array of argument tokens.
+   The function copies the input command line into kernel memory,
+   counts how many space-separated arguments it contains, allocates
+   an argv array of that size, and then extracts each argument into
+   the array. It returns the argv array and writes the argument count
+   into *argc. The returned argv contains pointers to the tokens within
+   the copied command-line buffer.
+*/
+static char** parse_cmd_line(const char* cmd_line, int* argc) {
+  char* copy = palloc_get_page(0);
+  ASSERT(copy != NULL);
+
+  strlcpy(copy, cmd_line, PGSIZE);
+
+  char* save_ptr;
+  char* token;
+
+  int count = 0;
+
+  for (token = strtok_r(copy, " ", &save_ptr); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr))
+    count++;
+
+  *argc = count;
+
+  char** argv = malloc(sizeof(char*) * *argc);
+  if (argv == NULL) {
+    palloc_free_page(copy);
+    return NULL;
+  }
+
+  strlcpy(copy, cmd_line, PGSIZE);
+  char* save_ptr_ii;
+  int i = 0;
+  for (token = strtok_r(copy, " ", &save_ptr_ii); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr_ii)) {
+    size_t len = strlen(token) + 1;
+    argv[i] = malloc(len);
+    if (argv[i] == NULL) {
+      /* roll back partial allocations to avoid leaks */
+      for (int j = 0; j < i; j++) {
+        free(argv[j]);
+      }
+      free(argv);
+      palloc_free_page(copy);
+      return NULL;
+    }
+    strlcpy(argv[i], token, len);
+    i++;
+  }
+
+  palloc_free_page(copy);
+  return argv;
+}
+
 /* Starts a new thread running a user program loaded from CMD_LINE.
    The new thread may be scheduled (and may even exit) before process_execute() returns.
    Returns the new process's thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
 process_execute (const char *cmd_line) 
 {
-  char *cmd_line_copy;
+  struct thread* cur = thread_current();
+  char* cmd_line_copy;
   tid_t tid;
 
   /* Make a copy of CMD_LINE.
@@ -51,11 +141,59 @@ process_execute (const char *cmd_line)
     return TID_ERROR;
   strlcpy (cmd_line_copy, cmd_line, PGSIZE);
 
+  int argc;
+  char** argv = parse_cmd_line(cmd_line_copy, &argc);
+  if (argv == NULL) {
+    palloc_free_page(cmd_line_copy);
+    return TID_ERROR;
+  }
+
+  int count_max_args =
+      (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
+  if (argc > count_max_args) {
+    palloc_free_page(cmd_line_copy);
+    for (int i = 0; i < argc; i++)
+      free(argv[i]);
+    free(argv);
+    return TID_ERROR;
+  }
   /* Create a new thread to execute CMD_LINE. */
-  tid = thread_create (cmd_line, PRI_DEFAULT, start_process, cmd_line_copy);
-  if (tid == TID_ERROR)
+  enum intr_level old_level = intr_disable();
+  tid = thread_create(argv[0], PRI_DEFAULT, start_process, cmd_line_copy);
+
+  if (tid == TID_ERROR) {
     palloc_free_page (cmd_line_copy);
-    
+    for (int i = 0; i < argc; i++)
+      free(argv[i]);
+    free(argv);
+    intr_set_level(old_level);
+    return TID_ERROR;
+  }
+
+  struct child_process* child_p = malloc(sizeof(struct child_process));
+  child_p->pid = (pid_t)tid;
+  child_p->exit_status = PROC_ERR;
+  child_p->has_exited = false;
+  child_p->load_success = false;
+
+  child_p->exists = true;     /* Child process exists when created */
+  child_p->has_parent = true; /* Parent exists initially */
+
+  lock_init(&child_p->exit_lock);
+  sema_init(&child_p->load_semaphore, 0);
+  sema_init(&child_p->wait_sema, 0);
+  hash_insert(&cur->process->children, &child_p->elem);
+
+  struct thread* child_thread = thread_get_by_tid(tid);
+  child_thread->child_info = child_p;
+  // if (child_thread != NULL) {
+  //   child_thread->process->parent = cur->process;
+  //   child_thread->process->child = child_p;
+  // }
+  intr_set_level(old_level);
+  for (int i = 0; i < argc; i++)
+    free(argv[i]);
+  free(argv);
   return tid;
 }
 
@@ -71,24 +209,137 @@ process_init (struct thread *t)
   /* Initialise process attributes. */
   process->pagedir = NULL;
   process->thread = t;
-  
+  // process->parent = NULL;
+  // process->child = NULL;
+  hash_init(&process->children, hash_child_process, hash_less_child_process,
+            NULL);
+  process->exit_status = PROC_ERR;
+  hash_init(&process->fd_table, hash_fd_table, hash_less_fd_table, NULL);
+  process->next_fd = FD_BEGIN;
+
+  /* Initializing lock of process struct*/
+  lock_init(&process->process_lock);
+
   /* Link thread to its process. */
   t->process = process;
   return true;
 }
 
+/* Pushes a pointer value onto the user stack.
+   Decrements the stack pointer by the given byte size and copies
+   the pointer-sized data into the new stack location. This is used
+   to place addresses (such as argv pointers) onto the user stack
+   during process setup.
+*/
+static void push_pointer_data(void** esp, const void* data, size_t bytes) {
+  *esp -= bytes;
+  memcpy(*esp, &data, bytes);
+}
+
+/* Pushes a null-terminated string onto the user stack.
+   The function calculates the string’s length (including the
+   terminating null byte), moves the stack pointer down by that
+   amount, and copies the string into the new stack space. This is
+   used when placing argument strings on the user stack during
+   process setup.
+*/
+static void push_string_data(void** esp, const char* sdata) {
+  size_t bytes = strlen(sdata) + 1;
+  *esp -= bytes;
+  strlcpy(*esp, sdata, bytes);
+}
+
+/* Pushes a NULL pointer onto the user stack.
+   Moves the stack pointer down by the size of a pointer and writes
+   a zeroed pointer value at that location. Used to terminate the
+   argv array on the user stack.
+*/
+static void push_null(void** esp) {
+  *esp -= sizeof(void*);
+  memset(*esp, 0, sizeof(void*));
+}
+
+/* Ensures the user stack pointer is aligned to the given boundary.
+   If the stack pointer is not already aligned, it is adjusted downward
+   by the required number of bytes, and the padding space is zeroed.
+   Proper alignment is required for user program startup conventions.
+*/
+static void align_stack(void** esp, size_t align) {
+  uintptr_t misalign = (uintptr_t)(*esp) % align;
+  if (misalign != 0) {
+    *esp -= misalign;
+    memset(*esp, 0, misalign);
+  }
+}
+
+/* Copies the program's command-line arguments onto the user stack in the
+   format expected by the PintOS process start-up convention. */
+static bool push_arguments(void** esp, char** argv, int argc) {
+  size_t total_arg_size = 0;
+  for (int i = 0; i < argc; i++) {
+    total_arg_size += strlen(argv[i]) + 1;
+  }
+
+  total_arg_size += 3;
+  total_arg_size += sizeof(void*) + (argc * sizeof(char*)) + sizeof(char**) +
+                    sizeof(int) + sizeof(void*);
+
+  if (total_arg_size > PGSIZE) {
+    return false; // Too large, fail gracefully
+  }
+
+  char* arg_addrs[argc];
+
+  for (int i = argc - 1; i >= 0; i--) {
+    push_string_data(esp, argv[i]);
+    arg_addrs[i] = *esp;
+  }
+
+  align_stack(esp, BYTE_SIZE);
+  // *esp = (void*)((uintptr_t)(*esp) & ~(4 - 1));
+
+  push_null(esp);
+
+  for (int i = argc - 1; i >= 0; i--) {
+    push_pointer_data(esp, arg_addrs[i], sizeof(char*));
+  }
+
+  char** argv_addr = *esp;
+  push_pointer_data(esp, argv_addr, sizeof(char**));
+
+  push_pointer_data(esp, (void*)(uintptr_t)argc, sizeof(int));
+  push_null(esp);
+
+  return true;
+}
+
 /* A thread function that loads a user process and starts it
    running. */
-static void
-start_process (void *args_)
-{
+static void start_process(void* args_) {
+
+  // size of stack to check for overflow
+  // char** argv = args_;
+  size_t size_stack = BYTE_SIZE * sizeof(void*);
+
+  // size_t max_args = (strlen(args_) + 1) / 2;
+
+  // size_t count_max_args =
+  //     (PGSIZE - BYTE_SIZE) / (sizeof(char) + sizeof(char) + sizeof(char*));
+
+  // size_t max_of_args = count_max_args > max_args ? count_max_args : max_args;
+  // char** argv = malloc(max_of_args * sizeof(char*));
+
+  // if (argv == NULL) {
+  //   success = false; // This needs to be some other error
+  // }
+
+  int argc = 0;
+  char** argv = parse_cmd_line(args_, &argc);
   struct thread *cur = thread_current ();
   char *file_name = args_;
   struct intr_frame if_;
-  bool success;
-  
-  /* Initialise process. */
-  success = process_init (cur);
+
+  bool success = process_init(cur);
 
   if (success)
     {
@@ -97,24 +348,38 @@ start_process (void *args_)
       if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
       if_.cs = SEL_UCSEG;
       if_.eflags = FLAG_IF | FLAG_MBS;
-      success = load (file_name, &if_.eip, &if_.esp);
-    }
+      success = load(argv[0], &if_.eip, &if_.esp);
+      cur->child_info->load_success = success;
+      sema_up(&cur->child_info->load_semaphore);
+      if (success) {
+        success = push_arguments(&if_.esp, argv, argc);
+      }
+  }
+
+  size_stack = (size_stack + (BYTE_SIZE - 1)) &
+               (~(BYTE_SIZE - 1) + (argc * (int)sizeof(char*)));
+
+  if (size_stack > PGSIZE) {
+    success = false;
+  }
 
   /* After loading, we are done with the command-line copy passed to us by process_execute. */
-  palloc_free_page (file_name);
-  
+  palloc_free_page(file_name);
+  for (int i = 0; i < argc; i++)
+    free(argv[i]);
+  free(argv);
   /* If load failed, terminate the process. */
-  if (!success) 
-    process_exit (PROC_ERR);
+  if (!success)
+    process_exit(PROC_ERR);
 
   /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  NOT_REACHED ();
+      interrupt, implemented by intr_exit (in
+      threads/intr-stubs.S).  Because intr_exit takes all of its
+      arguments on the stack in the form of a `struct intr_frame',
+      we just point the stack pointer (%esp) to our stack frame
+      and jump to it. */
+  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+  NOT_REACHED();
 }
 
 /* Waits for thread TID to die and returns its exit status. 
@@ -126,18 +391,97 @@ start_process (void *args_)
  * 
  * This function will be implemented in task 2.
  * For now, it does nothing. */
-int
-process_wait (tid_t child_tid UNUSED) 
-{
-  return PROC_ERR;
+int process_wait(tid_t child_tid UNUSED) {
+  // Look up child in current process's children hash
+  struct child_process mock_child;
+  mock_child.pid = (pid_t)child_tid;
+  struct hash_elem* e =
+      hash_find(&thread_current()->process->children, &mock_child.elem);
+  if (e == NULL)
+    return -1; // Invalid or non-child PID
+
+  struct child_process* child_process =
+      hash_entry(e, struct child_process, elem);
+
+  // Wait until child finishes execution (set by sema_up in process_exit)
+  sema_down(&child_process->wait_sema);
+
+  // Synchronize with child's exit (ensures exit_status is ready)
+  lock_acquire(&child_process->exit_lock);
+  lock_release(&child_process->exit_lock);
+
+  // Retrieve and clean up child info
+  int exit_status = child_process->exit_status;
+  hash_delete(&thread_current()->process->children, &child_process->elem);
+  free(child_process);
+
+  return exit_status; // Return child’s exit code to parent
+}
+
+/* Helper func to destroy children*/
+static void destroy_children(struct hash_elem* e, void* aux UNUSED) {
+  struct child_process* child = hash_entry(e, struct child_process, elem);
+
+  bool flag_free = false;
+  lock_acquire(&child->exit_lock);
+  /* If child does not exist, since parent is dying, free child_process. */
+  if (child->exists) {
+    child->has_parent = false;
+  } else {
+    flag_free = true;
+  }
+  lock_release(&child->exit_lock);
+
+  if (flag_free) {
+    free(child);
+  }
+}
+
+/* Helper func to destroy fd_table */
+static void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
+  struct file_desc* fd = hash_entry(element, struct file_desc, elem);
+  lock_acquire(&global_file_lock);
+  file_close(fd->file);
+  lock_release(&global_file_lock);
+  free(fd);
 }
 
 /* Free the current process's resources and then exit the underlying thread. */
 void
 process_exit (int exit_code UNUSED)
 {
-  struct process *cur = thread_current ()->process;
+  struct thread* t = thread_current();
+  struct process* cur = t->process;
+
+  bool flag_free = false;
+
+  /* telling parent child has exited and frees child_process if parent also
+   dead*/
+  if (t->child_info != NULL) {
+    lock_acquire(&t->child_info->exit_lock);
+    sema_up(&t->child_info->wait_sema);
+    if (t->child_info->has_parent) {
+      t->child_info->exists = false;
+      // sema_up(&cur->child->wait_sema);
+    } else {
+      flag_free = true;
+    }
+    lock_release(&t->child_info->exit_lock);
+    if (flag_free) {
+      free(t->child_info);
+    }
+  }
+
+  /* kill all children */
+  hash_destroy(&cur->children, destroy_children);
+
+  /* destroy fd_table */
+  lock_acquire(&cur->process_lock);
+  hash_destroy(&cur->fd_table, destroy_fd_table);
+  lock_release(&cur->process_lock);
+
   uint32_t *pd;
+  struct file *file;
   
   /* Clean up all process memory footprint, if it exists. */
   if (cur != NULL)
@@ -159,10 +503,24 @@ process_exit (int exit_code UNUSED)
           pagedir_activate (NULL);
           pagedir_destroy (pd);
         }
+
+      /* Allow access to the current process's executable file if
+         the process is exit */
+        file = cur->executable;
+        if (file != NULL) {
+          lock_acquire(&global_file_lock);
+          /* Don't have to file allow write as file close does that
+             but left it to be explicit about intent */
+          file_allow_write(file);
+          file_close(file);
+          lock_release(&global_file_lock);
+          cur->executable = NULL;
+        }
   
       /* Finally, destroy the current process's struct */
-      thread_current ()->process = NULL;
-      free(cur);
+        printf("%s: exit(%d)\n", thread_current()->name, exit_code);
+        thread_current()->process = NULL;
+        free(cur);
     }
     
   /* Now terminate the thread underlying this process. */
@@ -283,15 +641,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
-  /* Read and verify executable header. */
-  if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
-      || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
-      || ehdr.e_type != 2
-      || ehdr.e_machine != 3
-      || ehdr.e_version != 1
-      || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
-      || ehdr.e_phnum > 1024) 
-    {
+    cur->executable = file;
+    file_deny_write(file);
+
+    /* Read and verify executable header. */
+    if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
+        memcmp(ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 ||
+        ehdr.e_machine != 3 || ehdr.e_version != 1 ||
+        ehdr.e_phentsize != sizeof(struct Elf32_Phdr) || ehdr.e_phnum > 1024) {
       printf ("load: %s: error loading executable\n", file_name);
       goto done; 
     }
@@ -366,7 +723,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+
+  /* If load failed, clean up the executable file if it was opened. */
+  if (!success) {
+    if (file != NULL) {
+      file_close (file);
+    }
+    cur->executable = NULL;
+  }
   return success;
 }
 
@@ -515,4 +879,90 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (cur->pagedir, upage) == NULL
           && pagedir_set_page (cur->pagedir, upage, kpage, writable));
+}
+
+/* Returns the file that corresponds to the given file descriptor
+   from the current process. */
+struct file *
+process_get_file(int fd)
+{
+  struct process* cur = thread_current()->process;
+  struct file_desc key;
+  key.fd = fd;
+
+  struct hash_elem* e = hash_find(&cur->fd_table, &key.elem);
+  if (e == NULL)
+    return NULL;
+
+  struct file_desc* f = hash_entry(e, struct file_desc, elem);
+  return f->file;
+}
+
+/* Add a file to the current process and return the file
+   descriptor (fd) as a return value. Returns -1 if
+   operation fails. */
+int
+process_add_file(struct file *f)
+{
+  if (f == NULL)
+    return -1;
+
+  struct process* cur = thread_current()->process;
+  struct file_desc* fd = malloc(sizeof *fd);
+
+  if (fd == NULL)
+    return -1;
+
+  fd->fd = cur->next_fd++;
+  fd->file = f;
+  hash_insert(&cur->fd_table, &fd->elem);
+  return fd->fd;
+}
+
+/* Removes a file from the current process. */
+void
+process_close_file(int fd)
+{
+  if (fd < FD_BEGIN)
+    return;
+
+  struct process *cur = thread_current ()->process;
+  struct file_desc key;
+  key.fd = fd;
+
+  struct hash_elem* e = hash_find(&cur->fd_table, &key.elem);
+  if (e == NULL)
+    return;
+
+  struct file_desc* f = hash_entry(e, struct file_desc, elem);
+  hash_delete(&cur->fd_table, &f->elem);
+  lock_acquire(&global_file_lock);
+  file_close(f->file);
+  lock_release(&global_file_lock);
+  free(f);
+}
+
+/* Close all of the open files the current process has. */
+void
+process_close_all_files(void)
+{
+  struct process* cur = thread_current()->process;
+
+  /* Either iterate and delete or just destroy with a destructor. */
+  struct hash_iterator it;
+  hash_first(&it, &cur->fd_table);
+  while (hash_cur(&it) != NULL) {
+    struct hash_elem* e = hash_cur(&it);
+    struct file_desc* f = hash_entry(e, struct file_desc, elem);
+
+    /* Move iterator before we delete. */
+    hash_next(&it);
+    hash_delete(&cur->fd_table, &f->elem);
+
+    lock_acquire(&global_file_lock);
+    file_close(f->file);
+    lock_release(&global_file_lock);
+
+    free(f);
+  }
 }

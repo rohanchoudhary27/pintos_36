@@ -112,6 +112,8 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+    struct child_process* child_info;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     struct process *process;            /* Pointer to process running this thread. */
@@ -175,5 +177,7 @@ void thread_update_all_recent_cpu(void);
 
 void thread_update_priority(struct thread *t, void *aux);
 void thread_update_all_priority(void);
+
+struct thread* thread_get_by_tid(tid_t tid);
 
 #endif /* threads/thread.h */
