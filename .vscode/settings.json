@@ -9,7 +9,8 @@
       "syscall-nr.h": "c",
       "inttypes.h": "c",
       "stdio.h": "c",
-      "debug.h": "c"
+      "debug.h": "c",
+      "array": "c"
     },
     "C_Cpp.default.defines": [
 		  "USERPROG"
