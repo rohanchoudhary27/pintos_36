@@ -52,8 +52,8 @@ file_close (struct file *file)
 {
   if (file != NULL)
     {
-      lock_filesys ();
       file_allow_write (file);
+      lock_filesys ();
       inode_close (file->inode);
       free (file);
       unlock_filesys ();
@@ -132,8 +132,10 @@ file_deny_write (struct file *file)
   ASSERT (file != NULL);
   if (!file->deny_write) 
     {
+      lock_filesys ();
       file->deny_write = true;
       inode_deny_write (file->inode);
+      unlock_filesys ();
     }
 }
 
@@ -146,8 +148,10 @@ file_allow_write (struct file *file)
   ASSERT (file != NULL);
   if (file->deny_write) 
     {
+      lock_filesys ();
       file->deny_write = false;
       inode_allow_write (file->inode);
+      unlock_filesys ();
     }
 }
 
