@@ -426,9 +426,7 @@ static void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
 }
 
 /* Free the current process's resources and then exit the underlying thread. */
-void
-process_exit (int exit_code UNUSED)
-{
+void process_exit(int exit_code) {
   struct thread* t = thread_current();
   struct process* cur = t->process;
 
@@ -438,6 +436,10 @@ process_exit (int exit_code UNUSED)
    dead*/
   if (t->child_info != NULL) {
     lock_acquire(&t->child_info->exit_lock);
+
+    t->child_info->exit_status = exit_code;
+    t->child_info->has_exited = true; // Mark as exited
+
     sema_up(&t->child_info->wait_sema);
     if (t->child_info->has_parent) {
       t->child_info->exists = false;
