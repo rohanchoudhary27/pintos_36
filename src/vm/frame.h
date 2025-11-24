@@ -13,7 +13,7 @@ struct frame_table {
 };
 
 /* Global frame table. */
-static struct frame_table ft;
+struct frame_table ft;
 
 enum FRAME_KIND { FRAME_EXEC, FRAME_MMAP, FRAME_STACK };
 
@@ -46,5 +46,7 @@ struct frame* frame_lookup(void*);
 struct frame* frame_lookup_locked(void*);
 void frame_pin(void*);
 void frame_unpin(void*);
+
+void frame_table_print(void);
 
 #endif /* vm/frame.h */

@@ -23,9 +23,9 @@
 #include "threads/pte.h"
 #include "threads/thread.h"
 #ifdef USERPROG
-#include "userprog/process.h"
 #include "userprog/exception.h"
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include "userprog/syscall.h"
 #include "userprog/tss.h"
 #else
@@ -33,6 +33,7 @@
 #endif
 #ifdef VM
 #include "devices/swap.h"
+#include "vm/frame.h"
 #endif
 #ifdef FILESYS
 #include "devices/block.h"
@@ -116,6 +117,7 @@ main (void)
 #ifdef USERPROG
   exception_init ();
   root_process_init ();
+  frame_table_init();
   syscall_init ();
 #endif
 

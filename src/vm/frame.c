@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 static unsigned hash_frame_table(const struct hash_elem*, void*);
 static bool hash_less_frame_table(const struct hash_elem*,
@@ -254,5 +255,70 @@ void frame_unpin(void* k_addr) {
   struct frame* f = frame_lookup_locked(k_addr);
   if (f != NULL)
     f->pinned = false;
+  lock_release(&ft.frame_table_lock);
+}
+
+/* ----------------------------------------------------------------------
+ *  Debug helper: print the entire frame table in a readable format
+ * --------------------------------------------------------------------*/
+
+static const char* frame_kind_to_str(enum FRAME_KIND k) {
+  switch (k) {
+    case FRAME_EXEC:
+      return "EXEC";
+    case FRAME_MMAP:
+      return "MMAP";
+    case FRAME_STACK:
+      return "STACK";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+void frame_table_print(void) {
+  lock_acquire(&ft.frame_table_lock);
+
+  printf("\n==================== FRAME TABLE ====================\n");
+  printf("%-12s %-8s %-6s  %s\n", "k_addr", "kind", "pinned",
+         "mappings (process , user_vaddr)");
+
+  if (hash_empty(&ft.table)) {
+    printf("[no frames]\n");
+    return;
+  }
+
+  struct hash_iterator it;
+  hash_first(&it, &ft.table);
+
+  while (hash_next(&it)) {
+    struct frame* f = hash_entry(hash_cur(&it), struct frame, elem);
+
+    printf("%p  %-8s %-6s  ", f->k_addr, frame_kind_to_str(f->f_kind),
+           f->pinned ? "yes" : "no");
+
+    /* Print all mappings for this frame */
+    struct list_elem* e;
+    if (list_empty(&f->process_frame_mappings)) {
+      printf("[no mappings]\n");
+    } else {
+      bool first = true;
+      for (e = list_begin(&f->process_frame_mappings);
+           e != list_end(&f->process_frame_mappings); e = list_next(e)) {
+        struct process_frame_mapping* pfm =
+            list_entry(e, struct process_frame_mapping, elem);
+
+        if (!first)
+          printf("%46s", ""); /* indentation for subsequent mappings */
+
+        printf("(proc=%s , upage=%p)\n", pfm->process->thread->name,
+               pfm->user_vaddr);
+
+        first = false;
+      }
+    }
+  }
+
+  printf("======================================================\n\n");
+
   lock_release(&ft.frame_table_lock);
 }
