@@ -851,15 +851,20 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
+  // kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  struct process* cur_proc = thread_current()->process;
+  void* upage = ((uint8_t*)PHYS_BASE) - PGSIZE;
+
+  kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_STACK, cur_proc, upage);
+
+  if (kpage != NULL) {
+    success = install_page(upage, kpage, true);
+    if (success)
+      *esp = PHYS_BASE;
+    else
+      // palloc_free_page(kpage);
+      frame_free_mapping(kpage, cur_proc, upage);
+  }
   return success;
 }
 

@@ -15,7 +15,7 @@ struct frame_table {
 /* Global frame table. */
 struct frame_table ft;
 
-enum FRAME_KIND { FRAME_EXEC, FRAME_MMAP, FRAME_STACK };
+enum FRAME_KIND { FRAME_EXEC, FRAME_MMAP, FRAME_ANON };
 
 struct frame {
   void* k_addr; /* Kernel virtual address of the frame (from pallog_get_page) */
