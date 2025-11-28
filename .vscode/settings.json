@@ -16,7 +16,8 @@
       "malloc.h": "c",
       "vaddr.h": "c",
       "tests.h": "c",
-      "file.h": "c"
+      "file.h": "c",
+      "cstring": "c"
     },
     "C_Cpp.default.defines": [
 		  "USERPROG"
