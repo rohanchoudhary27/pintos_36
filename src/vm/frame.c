@@ -268,8 +268,8 @@ static const char* frame_kind_to_str(enum FRAME_KIND k) {
       return "EXEC";
     case FRAME_MMAP:
       return "MMAP";
-    case FRAME_STACK:
-      return "STACK";
+    case FRAME_ANON:
+      return "ANON";
     default:
       return "UNKNOWN";
   }

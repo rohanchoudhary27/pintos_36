@@ -855,7 +855,7 @@ setup_stack (void **esp)
   struct process* cur_proc = thread_current()->process;
   void* upage = ((uint8_t*)PHYS_BASE) - PGSIZE;
 
-  kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_STACK, cur_proc, upage);
+  kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_ANON, cur_proc, upage);
 
   if (kpage != NULL) {
     success = install_page(upage, kpage, true);

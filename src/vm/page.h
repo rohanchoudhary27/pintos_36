@@ -14,7 +14,7 @@ enum SPTE_KIND {
     SPTE_MMAP    /* File-backed page from a memory-mapped file */
 };
 
-
+/* Per process supplemental page table. */
 struct supplemental_page_table {
     struct hash page_map;    /* Hash: upage -> struct supp_page_table_entry. */
     struct lock lock;        /* Protects page_map and its entries. */
@@ -47,54 +47,24 @@ struct supp_page_table_entry {
     struct hash_elem elem;
 };
 
+void spt_init(struct supplemental_page_table*);
+void spt_destroy(struct supplemental_page_table*);
+struct supp_page_table_entry* spt_lookup(struct supplemental_page_table*,
+                                         const void*);
+struct supp_page_table_entry* spt_lookup_locked(struct supplemental_page_table*,
+                                                const void*);
 
-/*
+struct supp_page_table_entry* spt_add_exec(struct supplemental_page_table*,
+                                           void*, struct file*, off_t, size_t,
+                                           size_t, bool);
 
-Functions we need to implement:
+struct supp_page_table_entry* spt_add_anon(struct supplemental_page_table*,
+                                           void*, bool, bool);
 
-void spt_init(struct supplemental_page_table *spt);
-void spt_destroy(struct supplemental_page_table *spt);
-struct supp_page_table_entry* spt_lookup(struct supplemental_page_table *spt, void *upage); // this one uses locks
-struct supp_page_table_entry* spt_lookup_locked(struct supplemental_page_table *spt, void *upage); // this one does not use locks
-// ^ for the above 2 functions check out frame.h to see the usage
-struct supp_page_table_entry*
-spt_install_exec(struct supplemental_page_table *spt,
-                 void *upage,
-                 struct file *file,
-                 off_t offset,
-                 size_t read_bytes,
-                 size_t zero_bytes,
-                 bool writable);
-
-struct supp_page_table_entry *
-spt_install_anon(struct supplemental_page_table *spt,
-                 void *upage,
-                 bool writable,
-                 bool is_stack);
-
-struct supp_page_table_entry *
-spt_install_mmap(struct supplemental_page_table *spt,
-                 void *upage,
-                 struct file *file,
-                 off_t offset,
-                 size_t read_bytes,
-                 size_t zero_bytes,
-                 bool writable,
-                 int mapid);
-
-void spt_set_frame(struct supp_page_table_entry *spte,
-                   struct frame *frame);
-
-void spt_clear_frame(struct supp_page_table_entry *spte);
-
-
-void spt_remove(struct supplemental_page_table *spt,
-                struct supp_page_table_entry *spte);
-
-
-idk there may be other api's we need to implement as well
-
-
-*/
-
+struct supp_page_table_entry* spt_add_mmap(struct supplemental_page_table*,
+                                           void*, struct file*, off_t, size_t,
+                                           size_t, bool, int);
+void spt_remove(struct supplemental_page_table*, struct supp_page_table_entry*);
+void spt_set_frame(struct supp_page_table_entry*, struct frame*);
+void spt_clear_frame(struct supp_page_table_entry*);
 #endif VM_PAGE_H /* vm/page.h */
