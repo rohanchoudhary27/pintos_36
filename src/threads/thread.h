@@ -117,6 +117,7 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     struct process *process;            /* Pointer to process running this thread. */
+    void* user_esp;
 #endif
 
     /* Owned by thread.c. */

@@ -1,10 +1,13 @@
 #include "userprog/exception.h"
-#include <inttypes.h>
-#include <stdio.h>
-#include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/gdt.h"
 #include "userprog/process.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include <inttypes.h>
+#include <stdio.h>
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -145,14 +148,92 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+  struct thread* curr = thread_current();
+
+  if (fault_addr == NULL || !is_user_vaddr(fault_addr)) {
+    exit_and_set_process_status(-1);
+  }
+
+  if (!not_present) {
+    exit_and_set_process_status(-1);
+  }
+
+  struct supplemental_page_table* spt = &curr->process->spt;
+
+  struct supp_page_table_entry* spte = spt_lookup(spt, fault_addr);
+
+  if (spte != NULL) {
+    void* kpage = frame_alloc(PAL_USER, FRAME_EXEC, curr->process, spte->upage);
+    if (kpage == NULL) {
+      exit_and_set_process_status(-1);
+    }
+
+    bool success = false;
+
+    if (spte->file != NULL) {
+      file_seek(spte->file, spte->file_offset);
+
+      int bytes_read = file_read(spte->file, kpage, spte->read_bytes);
+
+      memset(kpage + bytes_read, 0, spte->zero_bytes);
+
+      if (bytes_read == spte->read_bytes) {
+        success = true;
+      }
+    } else if (spte->in_swap) {
+      success = false;
+    } else {
+      memset(kpage, 0, PGSIZE);
+      success = true;
+    }
+
+    if (success) {
+      spte->frame = kpage;
+      spte->in_swap = false;
+
+      if (!pagedir_set_page(curr->process->pagedir, spte->upage, kpage,
+                            spte->writable)) {
+        success = false;
+      }
+    }
+
+    if (!success) {
+      exit_and_set_process_status(-1);
+    }
+
+    return;
+
+    void* esp = (user ? f->esp : curr->user_esp);
+
+    bool valid_stack_access = (fault_addr >= (PHYS_BASE - 8 * 1024 * 1024)) &&
+                              (fault_addr >= (esp - 32));
+
+    if (valid_stack_access) {
+
+      void* upage = pg_round_down(fault_addr);
+
+      struct supp_page_table_entry* new_spte =
+          spt_add_anon(spt, upage, true, true);
+      if (new_spte == NULL)
+        exit_and_set_process_status(-1);
+
+      void* kpage =
+          frame_alloc(PAL_USER | PAL_ZERO, FRAME_EXEC, curr->process, upage);
+      if (kpage == NULL)
+        exit_and_set_process_status(-1);
+
+      /* C. Map it */
+      new_spte->frame = kpage;
+      if (!pagedir_set_page(curr->process->pagedir, upage, kpage, true)) {
+        exit_and_set_process_status(-1);
+      }
+
+      return;
+    }
+  }
+  printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+         not_present ? "not present" : "rights violation",
+         write ? "writing" : "reading", user ? "user" : "kernel");
+  kill(f);
 }
 

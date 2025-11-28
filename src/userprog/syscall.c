@@ -102,6 +102,7 @@ void syscall_init(void) {
 // Handles a system call invoked by a user program.
 // 'f' contains the user program's CPU state at the time of the syscall.
 static void syscall_handler(struct intr_frame* f) {
+  thread_current()->user_esp = f->esp;
   int syscall_no = get_syscall_number_from_frame(f);
   int num_syscall_funcs = sizeof(syscall_map) / sizeof(syscall_map[0]);
   if (syscall_no < 0 || syscall_no >= num_syscall_funcs) {
