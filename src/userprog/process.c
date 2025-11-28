@@ -1,13 +1,4 @@
 #include "userprog/process.h"
-#include <debug.h>
-#include <inttypes.h>
-#include <round.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "userprog/gdt.h"
-#include "userprog/pagedir.h"
-#include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -18,6 +9,34 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/gdt.h"
+#include "userprog/pagedir.h"
+#include "userprog/tss.h"
+#include "vm/frame.h"
+#include <debug.h>
+#include <inttypes.h>
+#include <round.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define DEBUG_PC 1
+
+#ifdef DEBUG_PC
+
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+    enum intr_level old = intr_disable();                                      \
+    struct thread* t = thread_current();                                       \
+    printf("[T=%s (%d) | %s:%d | %s] " fmt "\n", t ? t->name : "NO-THREAD",    \
+           t ? t->tid : -1, __FILE__, __LINE__, __func__, ##__VA_ARGS__);      \
+    intr_set_level(old);                                                       \
+  } while (0)
+#else
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+  } while (0)
+#endif
 
 #define BYTE_SIZE 4
 
@@ -662,29 +681,26 @@ load (const char *file_name, void (**eip) (void), void **esp)
         case PT_LOAD:
           if (validate_segment (&phdr, file)) 
             {
-              bool writable = (phdr.p_flags & PF_W) != 0;
-              uint32_t file_page = phdr.p_offset & ~PGMASK;
-              uint32_t mem_page = phdr.p_vaddr & ~PGMASK;
-              uint32_t page_offset = phdr.p_vaddr & PGMASK;
-              uint32_t read_bytes, zero_bytes;
-              if (phdr.p_filesz > 0)
-                {
-                  /* Normal segment.
-                     Read initial part from disk and zero the rest. */
-                  read_bytes = page_offset + phdr.p_filesz;
-                  zero_bytes = (ROUND_UP (page_offset + phdr.p_memsz, PGSIZE)
-                                - read_bytes);
-                }
-              else 
-                {
-                  /* Entirely zero.
-                     Don't read anything from disk. */
-                  read_bytes = 0;
-                  zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
-                }
-              if (!load_segment (file, file_page, (void *) mem_page,
-                                 read_bytes, zero_bytes, writable))
-                goto done;
+            bool writable = (phdr.p_flags & PF_W) != 0;
+            uint32_t file_page = phdr.p_offset & ~PGMASK;
+            uint32_t mem_page = phdr.p_vaddr & ~PGMASK;
+            uint32_t page_offset = phdr.p_vaddr & PGMASK;
+            uint32_t read_bytes, zero_bytes;
+            if (phdr.p_filesz > 0) {
+              /* Normal segment.
+                 Read initial part from disk and zero the rest. */
+              read_bytes = page_offset + phdr.p_filesz;
+              zero_bytes =
+                  (ROUND_UP(page_offset + phdr.p_memsz, PGSIZE) - read_bytes);
+            } else {
+              /* Entirely zero.
+                 Don't read anything from disk. */
+              read_bytes = 0;
+              zero_bytes = ROUND_UP(page_offset + phdr.p_memsz, PGSIZE);
+            }
+            if (!load_segment(file, file_page, (void*)mem_page, read_bytes,
+                              zero_bytes, writable))
+              goto done;
             }
           else
             goto done;
@@ -793,17 +809,23 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-        
+      struct process* cur_p = thread_current()->process;
       /* Get a new page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL){
+      DBG("allocating frame memory with frame_alloc with upage %p\n", upage);
+      // uint8_t *kpage = palloc_get_page (PAL_USER);
+      uint8_t* kpage = frame_alloc(PAL_USER, FRAME_EXEC, cur_p, upage);
+      DBG("got kernel page addr %p\n", kpage);
+      DBG("updated frame table: \n");
+      frame_table_print();
+      if (kpage == NULL) {
         return false;
       }
-        
+      DBG("installing the page to process address space with install_page\n");
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
       {
-        palloc_free_page (kpage);
+        // palloc_free_page (kpage);
+        frame_free_mapping(kpage, cur_p, upage);
         return false; 
       }     
 
@@ -829,15 +851,20 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
+  // kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  struct process* cur_proc = thread_current()->process;
+  void* upage = ((uint8_t*)PHYS_BASE) - PGSIZE;
+
+  kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_ANON, cur_proc, upage);
+
+  if (kpage != NULL) {
+    success = install_page(upage, kpage, true);
+    if (success)
+      *esp = PHYS_BASE;
+    else
+      // palloc_free_page(kpage);
+      frame_free_mapping(kpage, cur_proc, upage);
+  }
   return success;
 }
 
