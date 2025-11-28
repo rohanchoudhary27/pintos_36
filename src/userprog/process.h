@@ -5,6 +5,7 @@
 #include "syscall.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "vm/page.h"
 
 #define PROC_SUCC (0)  /* Exit code for normal process termination. */
 #define PROC_ERR (-1)  /* Exit code for erroneous process termination. */
@@ -14,6 +15,7 @@ typedef int pid_t;
 /* A user process, wrapped around a kernel thread. */
 struct process {
   uint32_t* pagedir;          /* Process page directory. */
+  struct supplemental_page_table* spt;
   struct thread* thread;      /* Process underlying kernel thread. */
   struct file* executable;    /* Process executable file */
   struct hash fd_table;       /* Hashmap that contains fd file pairs */

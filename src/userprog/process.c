@@ -13,6 +13,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -223,6 +224,10 @@ process_init (struct thread *t)
 
   /* Initialise process attributes. */
   process->pagedir = NULL;
+  struct supplemental_page_table* spt =
+      malloc(sizeof(struct supplemental_page_table));
+  spt_init(spt);
+  process->spt = spt;
   process->thread = t;
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
@@ -799,6 +804,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
+
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
@@ -809,36 +815,19 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
       struct process* cur_p = thread_current()->process;
-      /* Get a new page of memory. */
-      DBG("allocating frame memory with frame_alloc with upage %p\n", upage);
-      // uint8_t *kpage = palloc_get_page (PAL_USER);
-      uint8_t* kpage = frame_alloc(PAL_USER, FRAME_EXEC, cur_p, upage);
-      DBG("got kernel page addr %p\n", kpage);
-      DBG("updated frame table: \n");
-      frame_table_print();
-      if (kpage == NULL) {
+
+      if (!spt_add_exec(cur_p->spt, upage, file, ofs, page_read_bytes,
+                        page_zero_bytes, writable)) {
         return false;
       }
-      DBG("installing the page to process address space with install_page\n");
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-      {
-        // palloc_free_page (kpage);
-        frame_free_mapping(kpage, cur_p, upage);
-        return false; 
-      }     
-
-      /* Load data into the page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes){
-        return false; 
-      }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += page_read_bytes;
     }
   return true;
 }
