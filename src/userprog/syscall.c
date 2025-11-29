@@ -9,12 +9,29 @@
 #include "user/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
 #include <debug.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <syscall-nr.h>
+
+#define DEBUG_PC 1
+
+#ifdef DEBUG_PC
+
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
+           ##__VA_ARGS__);                                                     \
+  } while (0)
+#else
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+  } while (0)
+#endif
 
 // Define the number of bits used to represent a system call number.
 // In Pintos, system call numbers are stored as 32-bit integers.
@@ -158,8 +175,7 @@ static void is_valid_uaddr(const void* addr) {
 
   if (addr == NULL || !is_user_vaddr(addr) || current_thread == NULL ||
       current_thread->process == NULL ||
-      current_thread->process->pagedir == NULL ||
-      pagedir_get_page(current_thread->process->pagedir, addr) == NULL) {
+      current_thread->process->pagedir == NULL) {
     exit_and_set_process_status(PROC_ERR);
   }
 }
@@ -385,6 +401,11 @@ static void* sys_read(int argc, void* argv[]) {
     return (void*)SYS_ERROR; // Can't read from output file so return -1
   }
 
+  /* Make sure [buffer, buffer+size) is loaded into frames and pinned.*/
+  if (!load_and_pin_user_buffer_pages(buffer, size)) {
+    return (void*)SYS_ERROR;
+  }
+
   if (fd == STDIN_FILENO) {
     for (uint32_t i = 0; i < size; i++) {
       ((char*)buffer)[i] = input_getc();
@@ -396,13 +417,15 @@ static void* sys_read(int argc, void* argv[]) {
     in it's properties */
   struct file* file = process_get_file(fd);
 
-  if (file == NULL)
+  if (file == NULL) {
+    unpin_user_buffer_pages(buffer, size);
     return (void*)SYS_ERROR; // If no file is found with given fd return -1
+  }
 
   lock_acquire(&global_file_lock);
   int bytes_read = file_read(file, buffer, size);
   lock_release(&global_file_lock);
-
+  unpin_user_buffer_pages(buffer, size);
   return (void*)bytes_read;
 }
 

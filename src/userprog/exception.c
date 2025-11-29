@@ -8,6 +8,22 @@
 #include "vm/page.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
+
+#define DEBUG_PC 1
+
+#ifdef DEBUG_PC
+
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
+           ##__VA_ARGS__);                                                     \
+  } while (0)
+#else
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+  } while (0)
+#endif
 
 #define MAX_STACK_SIZE (1 << 23) // 8MB is the maximum stack size
 
@@ -155,7 +171,7 @@ page_fault (struct intr_frame *f)
 
   struct thread* curr = thread_current();
 
-  struct supplemental_page_table* spt = &curr->process->spt;
+  struct supplemental_page_table* spt = curr->process->spt;
 
   /* The spt_lookup function uses the spt lock inside. */
   struct supp_page_table_entry* spte = spt_lookup(spt, fault_addr);
@@ -180,82 +196,10 @@ page_fault (struct intr_frame *f)
     }
   }
 
-  // TODO FIXME: this is not true, according to spec it should process_exit?
   if (!success) {
     printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
            not_present ? "not present" : "rights violation",
            write ? "writing" : "reading", user ? "user" : "kernel");
     kill(f);
   }
-}
-
-/*
-TODO: the slides say Beware: as with any other page, the stack can be swapped
-out does this mean if it's in a swap slot it should be brought back? idk
-*/
-static bool grow_stack(void* fault_addr, struct supplemental_page_table* spt) {
-  struct process* p = thread_current()->process;
-  void* upage = pg_round_down(fault_addr);
-
-  struct supp_page_table_entry* new_spte = spt_add_anon(spt, upage, true, true);
-  if (new_spte == NULL)
-    return false;
-
-  void* kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_ANON, p, upage);
-  if (kpage == NULL) {
-    spt_remove(spt, new_spte);
-    return false;
-  }
-
-  struct frame* f = frame_lookup(kpage);
-  spt_set_frame(new_spte, f);
-
-  if (!install_page(upage, kpage, new_spte->writable)) {
-    spt_remove(spt, new_spte);
-    frame_free_mapping(kpage, p, upage);
-    return false;
-  }
-  return true;
-}
-
-static bool lazy_load_page(struct supp_page_table_entry* spte) {
-  struct process* p = thread_current()->process;
-  void* upage = spte->upage;
-
-  void* kpage;
-  if (spte->kind != SPTE_EXEC)
-    return false;
-
-  kpage = frame_alloc(PAL_USER, FRAME_EXEC, p, upage);
-
-  if (kpage == NULL)
-    return false;
-
-  bool success = true;
-
-  if (spte->file != NULL && spte->kind == SPTE_EXEC ||
-      spte->kind == SPTE_MMAP) { /* File-backed SPTE */
-    file_seek(spte->file, spte->file_offset);
-
-    int bytes_read = file_read(spte->file, kpage, spte->read_bytes);
-
-    if (bytes_read != (int)spte->read_bytes)
-      success = false;
-    memset(kpage + bytes_read, 0, spte->zero_bytes);
-  }
-
-  if (!success) {
-    frame_free_mapping(kpage, p, upage);
-    return false;
-  }
-
-  if (!install_page(upage, kpage, spte->writable)) {
-    frame_free_mapping(kpage, p, upage);
-    return false;
-  }
-
-  struct frame* f = frame_lookup(kpage);
-  spt_set_frame(spte, f);
-  spte->in_swap = false;
-  return true;
 }

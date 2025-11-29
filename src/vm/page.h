@@ -67,4 +67,9 @@ struct supp_page_table_entry* spt_add_mmap(struct supplemental_page_table*,
 void spt_remove(struct supplemental_page_table*, struct supp_page_table_entry*);
 void spt_set_frame(struct supp_page_table_entry*, struct frame*);
 void spt_clear_frame(struct supp_page_table_entry*);
-#endif VM_PAGE_H /* vm/page.h */
+
+bool lazy_load_page(struct supp_page_table_entry*);
+bool grow_stack(void*, struct supplemental_page_table*);
+bool load_and_pin_user_buffer_pages(void*, unsigned);
+void unpin_user_buffer_pages(void*, unsigned);
+#endif /* vm/page.h */

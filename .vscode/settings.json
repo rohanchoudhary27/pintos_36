@@ -17,7 +17,8 @@
       "vaddr.h": "c",
       "tests.h": "c",
       "file.h": "c",
-      "cstring": "c"
+      "cstring": "c",
+      "off_t.h": "c"
     },
     "C_Cpp.default.defines": [
 		  "USERPROG"

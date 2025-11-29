@@ -1,12 +1,11 @@
 /* Reads data spanning two pages in virtual address space,
    which must succeed. */
 
-#include <string.h>
-#include <syscall.h>
-#include "tests/userprog/boundary.h"
-#include "tests/userprog/sample.inc"
 #include "tests/lib.h"
 #include "tests/main.h"
+#include "tests/userprog/boundary.h"
+#include "tests/userprog/sample.inc"
+#include <syscall.h>
 
 void
 test_main (void) 
