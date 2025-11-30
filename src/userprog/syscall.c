@@ -119,7 +119,8 @@ void syscall_init(void) {
 // Handles a system call invoked by a user program.
 // 'f' contains the user program's CPU state at the time of the syscall.
 static void syscall_handler(struct intr_frame* f) {
-  thread_current()->user_esp = f->esp;
+  void* esp_save = f->esp;
+  thread_current()->user_esp = esp_save;
   int syscall_no = get_syscall_number_from_frame(f);
   int num_syscall_funcs = sizeof(syscall_map) / sizeof(syscall_map[0]);
   if (syscall_no < 0 || syscall_no >= num_syscall_funcs) {
@@ -138,6 +139,7 @@ static void syscall_handler(struct intr_frame* f) {
     uint32_t feax = (uint32_t)sys_info.sys_func(sys_info.argc, argv);
     f->eax = feax;
   }
+  f->esp = esp_save;
 }
 
 /* Gets syscall number from the interrupt frame, and kills the process if the
@@ -176,6 +178,16 @@ static void is_valid_uaddr(const void* addr) {
   if (addr == NULL || !is_user_vaddr(addr) || current_thread == NULL ||
       current_thread->process == NULL ||
       current_thread->process->pagedir == NULL) {
+    exit_and_set_process_status(PROC_ERR);
+  }
+
+  if (pagedir_get_page(thread_current()->process->pagedir, addr) != NULL)
+    return;
+
+  void* upage = pg_round_down(addr);
+  void* user_esp = thread_current()->user_esp;
+
+  if (!VALID_STACK_ACCESS(upage, user_esp)) {
     exit_and_set_process_status(PROC_ERR);
   }
 }

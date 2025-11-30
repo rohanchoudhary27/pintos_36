@@ -822,7 +822,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
                         page_zero_bytes, writable)) {
         return false;
       }
-
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -848,9 +847,17 @@ setup_stack (void **esp)
 
   if (kpage != NULL) {
     success = install_page(upage, kpage, true);
-    if (success)
+    if (success) {
+      struct process* p = thread_current()->process;
+      struct supp_page_table_entry* spte =
+          spt_add_anon(p->spt, upage, true, true);
+
+      if (spte != NULL) {
+        struct frame* f = frame_lookup(kpage);
+        spt_set_frame(spte, f);
+      }
       *esp = PHYS_BASE;
-    else
+    } else
       // palloc_free_page(kpage);
       frame_free_mapping(kpage, cur_proc, upage);
   }

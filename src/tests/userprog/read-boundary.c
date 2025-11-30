@@ -5,6 +5,7 @@
 #include "tests/main.h"
 #include "tests/userprog/boundary.h"
 #include "tests/userprog/sample.inc"
+#include <string.h>
 #include <syscall.h>
 
 void

@@ -18,7 +18,9 @@
       "tests.h": "c",
       "file.h": "c",
       "cstring": "c",
-      "off_t.h": "c"
+      "off_t.h": "c",
+      "page.h": "c",
+      "stdint.h": "c"
     },
     "C_Cpp.default.defines": [
 		  "USERPROG"

@@ -271,6 +271,66 @@ void spt_clear_frame(struct supp_page_table_entry* spte) {
   spte->frame = NULL;
 }
 
+void spt_print(struct supplemental_page_table* spt) {
+  ASSERT(spt != NULL);
+
+  lock_acquire(&spt->lock);
+
+  printf(
+      "\n==================== SUPPLEMENTAL PAGE TABLE ====================\n");
+  printf("%-12s %-8s %-9s %-10s %-10s  %-10s %-10s %-10s\n", "upage", "kind",
+         "writable", "in_frame", "in_swap", "file_ofs", "read_bytes",
+         "zero_bytes");
+
+  if (hash_empty(&spt->page_map)) {
+    printf("[no entries]\n");
+    printf("================================================================="
+           "\n\n");
+    lock_release(&spt->lock);
+    return;
+  }
+
+  struct hash_iterator it;
+  hash_first(&it, &spt->page_map);
+
+  while (hash_next(&it)) {
+    struct supp_page_table_entry* spte =
+        hash_entry(hash_cur(&it), struct supp_page_table_entry, elem);
+
+    const char* kind_str = spte->kind == SPTE_EXEC   ? "EXEC"
+                           : spte->kind == SPTE_ANON ? "ANON"
+                           : spte->kind == SPTE_MMAP ? "MMAP"
+                                                     : "UNK";
+
+    const char* frame_str = spte->frame ? "yes" : "no";
+
+    printf("%p  %-8s %-9s %-10s %-10s", spte->upage, kind_str,
+           spte->writable ? "true" : "false", frame_str,
+           spte->in_swap ? "true" : "false");
+
+    /* For EXEC/MMAP pages, show file metadata. */
+    if (spte->kind == SPTE_EXEC || spte->kind == SPTE_MMAP) {
+      printf("  %-10d %-10zu %-10zu", (int)spte->file_offset, spte->read_bytes,
+             spte->zero_bytes);
+    } else {
+      /* For ANON pages, we can print placeholders. */
+      printf("  %-10s %-10s %-10s", "-", "-", "-");
+    }
+
+    printf("\n");
+
+    /* If page is mapped in a frame, print the frame address too. */
+    if (spte->frame) {
+      printf("          -> frame kaddr: %p\n", spte->frame->k_addr);
+    }
+  }
+
+  printf(
+      "=================================================================\n\n");
+
+  lock_release(&spt->lock);
+}
+
 /* ----------------------------------------------------------------------
  *  Task 3 functions -- Lazy Loading, Stack Growth
  * --------------------------------------------------------------------*/

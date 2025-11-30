@@ -7,6 +7,7 @@
 #include "vm/frame.h"
 #include "vm/page.h"
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -24,11 +25,6 @@
   do {                                                                         \
   } while (0)
 #endif
-
-#define MAX_STACK_SIZE (1 << 23) // 8MB is the maximum stack size
-
-#define VALID_STACK_ACCESS(paddr, esp)                                         \
-  (((PHYS_BASE - paddr) <= MAX_STACK_SIZE) && (paddr >= (esp - 32)))
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -190,9 +186,11 @@ page_fault (struct intr_frame *f)
         success = true;
       else
         success = false;
-    } else if (VALID_STACK_ACCESS(pg_round_down(fault_addr),
+    } else if (VALID_STACK_ACCESS(fault_addr,
                                   (user ? f->esp : curr->user_esp))) {
       success = grow_stack(fault_addr, spt);
+    } else {
+      success = false;
     }
   }
 
