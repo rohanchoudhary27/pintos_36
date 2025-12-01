@@ -27,6 +27,10 @@
   } while (0)
 #endif
 
+static unsigned hash_read_only_table(const struct hash_elem*, void*);
+static bool hash_less_read_only_table(const struct hash_elem*,
+                                      const struct hash_elem*, void*);
+
 /* ----------------------------------------------------------------------
  *  Hash helpers
  * --------------------------------------------------------------------*/
@@ -46,6 +50,38 @@ static bool spt_less(const struct hash_elem* a, const struct hash_elem* b,
   const struct supp_page_table_entry* spte_b =
       hash_entry(b, struct supp_page_table_entry, elem);
   return spte_a->upage < spte_b->upage;
+}
+
+/* Read_only_table hash functions */
+
+static unsigned hash_read_only_table(const struct hash_elem* e, void*) {
+  struct read_only_entry* read_only_entry =
+      hash_entry(e, struct read_only_entry, elem);
+
+  unsigned hash1 = hash_ptr(read_only_entry->file);
+  unsigned hash2 = hash_int(read_only_entry->offset);
+
+  // Return exclusive or (^) -arbitrary func- as demonstrated in example in
+  // spec
+  return hash1 ^ hash2;
+}
+
+static bool hash_less_read_only_table(const struct hash_elem* a,
+                                      const struct hash_elem* b, void*) {
+  struct read_only_entry* read_only_entry_a =
+      hash_entry(a, struct read_only_entry, elem);
+  struct read_only_entry* read_only_entry_b =
+      hash_entry(b, struct read_only_entry, elem);
+
+  struct file* file_a = read_only_entry_a->file;
+  struct file* file_b = read_only_entry_b->file;
+
+  // Compare both the keys in comparision
+  if (file_a != file_b) {
+    return (file_a < file_b);
+  } else {
+    return (read_only_entry_a->offset < read_only_entry_b->offset);
+  }
 }
 
 /* ----------------------------------------------------------------------

@@ -54,6 +54,20 @@ struct supp_page_table_entry {
     struct hash_elem elem;
 };
 
+/* Global read only table */
+struct read_only_table {
+  struct hash read_only_table;
+};
+
+struct read_only_entry {
+  struct file* file;
+  off_t offset;
+  void* page;
+  // Note we dont care which process is referencing it
+  int reference_count;
+  struct hash_elem elem;
+};
+
 void spt_init(struct supplemental_page_table*);
 void spt_destroy(struct supplemental_page_table*);
 struct supp_page_table_entry* spt_lookup(struct supplemental_page_table*,
