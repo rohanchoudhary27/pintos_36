@@ -836,6 +836,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
+  DBG("setuping the stack!!!");
   uint8_t *kpage;
   bool success = false;
 
@@ -861,6 +862,7 @@ setup_stack (void **esp)
       // palloc_free_page(kpage);
       frame_free_mapping(kpage, cur_proc, upage);
   }
+  DBG("DONE SETUPING the stack!!!");
   return success;
 }
 
