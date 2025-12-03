@@ -415,7 +415,8 @@ bool grow_stack(void* fault_addr, struct supplemental_page_table* spt) {
   return true;
 }
 
-bool load_and_pin_user_buffer_pages(void* buffer, unsigned size) {
+bool load_and_pin_user_buffer_pages(void* buffer, unsigned size,
+                                    bool for_write) {
   if (size == 0)
     return true;
 
@@ -428,6 +429,9 @@ bool load_and_pin_user_buffer_pages(void* buffer, unsigned size) {
   for (uint8_t* upage = start; upage <= end; upage += PGSIZE) {
     struct supp_page_table_entry* spte = spt_lookup(spt, upage);
     if (spte == NULL)
+      return false;
+
+    if (for_write && !spte->writable)
       return false;
 
     if (spte->frame == NULL) { // not in frame yet, demand load

@@ -78,6 +78,6 @@ void spt_print(struct supplemental_page_table*);
 
 bool lazy_load_page(struct supp_page_table_entry*);
 bool grow_stack(void*, struct supplemental_page_table*);
-bool load_and_pin_user_buffer_pages(void*, unsigned);
+bool load_and_pin_user_buffer_pages(void*, unsigned, bool);
 void unpin_user_buffer_pages(void*, unsigned);
 #endif /* vm/page.h */

@@ -4,15 +4,16 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#include "vm/page.h"
 #include <debug.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
-#define DEBUG_PC 1
+#define DEBUG_FR 1
 
-#ifdef DEBUG_PC
+#ifdef DEBUG_FR
 
 #define DBG(fmt, ...)                                                          \
   do {                                                                         \
@@ -25,6 +26,7 @@
   } while (0)
 #endif
 
+static struct frame* frame_to_evict(void);
 static unsigned hash_frame_table(const struct hash_elem*, void*);
 static bool hash_less_frame_table(const struct hash_elem*,
                                   const struct hash_elem*, void*);
@@ -231,19 +233,12 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   ASSERT(proc != NULL);
   ASSERT(flags & PAL_USER); // only manage user frames
 
-  DBG("got upage %p in frame_alloc", upage);
-  frame_table_print();
-
   void* k_addr = palloc_get_page(flags | PAL_USER);
 
-  DBG("just got k_addr %p with palloc_get_page", k_addr);
-
   if (k_addr == NULL) {
-    // eviction later here
+    // eviction
     return NULL;
   }
-
-  DBG("addr is not null");
 
   struct frame* f = malloc(sizeof *f);
   if (f == NULL) {
@@ -268,10 +263,8 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   lock_acquire(&ft.frame_table_lock);
   list_push_back(&f->process_frame_mappings, &pfm->elem);
   struct hash_elem* old = hash_insert(&ft.table, &f->elem);
-  DBG("inserted the frame to frame table");
   ASSERT(old == NULL);
   list_push_back(&frame_list, &f->clock_elem);
-  DBG("old is null!!!! returning k_addr");
   lock_release(&ft.frame_table_lock);
 
   return k_addr;
@@ -365,6 +358,9 @@ static const char* frame_kind_to_str(enum FRAME_KIND k) {
 }
 
 void frame_table_print(void) {
+#ifndef DEBUG_FR
+  return;
+#endif
   lock_acquire(&ft.frame_table_lock);
 
   printf("\n==================== FRAME TABLE ====================\n");

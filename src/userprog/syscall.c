@@ -414,8 +414,9 @@ static void* sys_read(int argc, void* argv[]) {
   }
 
   /* Make sure [buffer, buffer+size) is loaded into frames and pinned.*/
-  if (!load_and_pin_user_buffer_pages(buffer, size)) {
-    return (void*)SYS_ERROR;
+  if (!load_and_pin_user_buffer_pages(buffer, size, true)) {
+    exit_and_set_process_status(SYS_ERROR);
+    // return (void*)SYS_ERROR;
   }
 
   if (fd == STDIN_FILENO) {

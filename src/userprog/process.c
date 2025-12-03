@@ -46,6 +46,7 @@ static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static char** parse_cmd_line(const char*, int*);
 static void destroy_fd_table(struct hash_elem*, void*);
+static void spt_release_entry(struct hash_elem*, void*);
 
 /* child proc hash func */
 static unsigned hash_child_process(const struct hash_elem* e,
@@ -488,48 +489,84 @@ void process_exit(int exit_code) {
   struct file *file;
   
   /* Clean up all process memory footprint, if it exists. */
-  if (cur != NULL)
-    {  
+  if (cur != NULL) {
 
-      /* Destroy the current process's page directory and switch back
-         to the kernel-only page directory. */
-      pd = cur->pagedir;
-      if (pd != NULL) 
-        {
-          /* Correct ordering here is crucial.  We must set
-             cur->pagedir to NULL before switching page directories,
-             so that a timer interrupt can't switch back to the
-             process page directory.  We must activate the base page
-             directory before destroying the process's page
-             directory, or our active page directory will be one
-             that's been freed (and cleared). */
-          cur->pagedir = NULL;
-          pagedir_activate (NULL);
-          pagedir_destroy (pd);
-        }
+    if (cur->spt != NULL) {
+      struct supplemental_page_table* spt = cur->spt;
 
-      /* Allow access to the current process's executable file if
-         the process is exit */
-        file = cur->executable;
-        if (file != NULL) {
-          lock_acquire(&global_file_lock);
-          /* Don't have to file allow write as file close does that
-             but left it to be explicit about intent */
-          file_allow_write(file);
-          file_close(file);
-          lock_release(&global_file_lock);
-          cur->executable = NULL;
-        }
-  
-      /* Finally, destroy the current process's struct */
-        printf("%s: exit(%d)\n", thread_current()->name, exit_code);
-        thread_current()->process = NULL;
-        free(cur);
+      /* release frames and swap slots for all SPTEs. */
+      lock_acquire(&spt->lock);
+      spt->page_map.aux = (void*)cur;
+      hash_apply(&spt->page_map, spt_release_entry);
+      lock_release(&spt->lock);
+
+      /* Then destroy the SPT. */
+      spt_destroy(spt);
+
+      /* Then destroy the SPT itself (frees SPTE structs). */
+      cur->spt = NULL;
+      /* If cur->spt was heap-allocated, free(cur->spt) here. */
     }
-    
+
+    /* Destroy the current process's page directory and switch back
+       to the kernel-only page directory. */
+    pd = cur->pagedir;
+    if (pd != NULL) {
+      /* Correct ordering here is crucial.  We must set
+         cur->pagedir to NULL before switching page directories,
+         so that a timer interrupt can't switch back to the
+         process page directory.  We must activate the base page
+         directory before destroying the process's page
+         directory, or our active page directory will be one
+         that's been freed (and cleared). */
+      cur->pagedir = NULL;
+      pagedir_activate(NULL);
+      pagedir_destroy(pd);
+    }
+
+    /* Allow access to the current process's executable file if
+       the process is exit */
+    file = cur->executable;
+    if (file != NULL) {
+      lock_acquire(&global_file_lock);
+      /* Don't have to file allow write as file close does that
+         but left it to be explicit about intent */
+      file_allow_write(file);
+      file_close(file);
+      lock_release(&global_file_lock);
+      cur->executable = NULL;
+    }
+
+    /* Finally, destroy the current process's struct */
+    printf("%s: exit(%d)\n", thread_current()->name, exit_code);
+    thread_current()->process = NULL;
+    free(cur);
+  }
+
   /* Now terminate the thread underlying this process. */
   thread_exit();
   NOT_REACHED ();
+}
+
+static void spt_release_entry(struct hash_elem* e, void* aux) {
+  struct supp_page_table_entry* spte =
+      hash_entry(e, struct supp_page_table_entry, elem);
+  struct process* proc = (struct process*)aux;
+
+  /* Drop this process's mapping to the frame. */
+  if (spte->frame != NULL) {
+    frame_free_mapping(spte->frame->k_addr, proc, spte->upage);
+    spte->frame = NULL;
+  }
+
+  /* Release swap slot, if any. */
+  if (spte->in_swap) {
+    // swap_free(spte->swap_slot); /* or your equivalent */
+    // spte->in_swap = false;
+  }
+
+  /* For MMAP pages, you may also want to do extra bookkeeping here
+     (e.g. write-back dirty pages) depending on your mmap design. */
 }
 
 /* Sets up the CPU for running user code in the current thread.
@@ -833,10 +870,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool
-setup_stack (void **esp) 
-{
-  DBG("setuping the stack!!!");
+static bool setup_stack(void** esp) {
   uint8_t *kpage;
   bool success = false;
 
@@ -862,7 +896,6 @@ setup_stack (void **esp)
       // palloc_free_page(kpage);
       frame_free_mapping(kpage, cur_proc, upage);
   }
-  DBG("DONE SETUPING the stack!!!");
   return success;
 }
 
