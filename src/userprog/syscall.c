@@ -9,12 +9,30 @@
 #include "user/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/mmap.h"
 
 #include <debug.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <syscall-nr.h>
+
+#define DEBUG_PC 1
+
+#ifdef DEBUG_PC
+
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
+           ##__VA_ARGS__);                                                     \
+  } while (0)
+#else
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+  } while (0)
+#endif
 
 // Define the number of bits used to represent a system call number.
 // In Pintos, system call numbers are stored as 32-bit integers.
@@ -33,6 +51,9 @@ static void* sys_write(int argc, void* argv[]);
 static void* sys_seek(int argc, void* argv[]);
 static void* sys_tell(int argc, void* argv[]);
 static void* sys_close(int argc, void* argv[]);
+
+static void* sys_mmap(int argc, void* argv[]);
+static void* sys_munmap(int argc, void* argv[]);
 
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
@@ -90,8 +111,14 @@ static struct syscall_descriptor syscall_map[] = {
     [SYS_TELL] = {.argc = 1,
                   .is_return_void = 0,
                   .sys_func = (syscall_f)sys_tell},
-    [SYS_CLOSE] = {
-        .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_close}};
+    [SYS_CLOSE] = {.argc = 1,
+                   .is_return_void = 1,
+                   .sys_func = (syscall_f)sys_close},
+    [SYS_MMAP] = {.argc = 2,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_mmap},
+    [SYS_MUNMAP] = {
+        .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_munmap}};
 
 // Initializes the system call interface in Pintos.
 void syscall_init(void) {
@@ -102,6 +129,8 @@ void syscall_init(void) {
 // Handles a system call invoked by a user program.
 // 'f' contains the user program's CPU state at the time of the syscall.
 static void syscall_handler(struct intr_frame* f) {
+  void* esp_save = f->esp;
+  thread_current()->user_esp = esp_save;
   int syscall_no = get_syscall_number_from_frame(f);
   int num_syscall_funcs = sizeof(syscall_map) / sizeof(syscall_map[0]);
   if (syscall_no < 0 || syscall_no >= num_syscall_funcs) {
@@ -120,6 +149,7 @@ static void syscall_handler(struct intr_frame* f) {
     uint32_t feax = (uint32_t)sys_info.sys_func(sys_info.argc, argv);
     f->eax = feax;
   }
+  f->esp = esp_save;
 }
 
 /* Gets syscall number from the interrupt frame, and kills the process if the
@@ -147,7 +177,7 @@ static void validate_string(const char* s) {
 }
 
 /*
- * Checks if a user-supplied address is valid and mapped.
+ * Checks if a user-supplied address is valid.
  * Terminates the process if the address is NULL, not in user space,
  * or not mapped in the page directory.
  */
@@ -157,8 +187,17 @@ static void is_valid_uaddr(const void* addr) {
 
   if (addr == NULL || !is_user_vaddr(addr) || current_thread == NULL ||
       current_thread->process == NULL ||
-      current_thread->process->pagedir == NULL ||
-      pagedir_get_page(current_thread->process->pagedir, addr) == NULL) {
+      current_thread->process->pagedir == NULL) {
+    exit_and_set_process_status(PROC_ERR);
+  }
+
+  if (pagedir_get_page(thread_current()->process->pagedir, addr) != NULL)
+    return;
+
+  void* upage = pg_round_down(addr);
+  void* user_esp = thread_current()->user_esp;
+
+  if (!VALID_STACK_ACCESS(upage, user_esp)) {
     exit_and_set_process_status(PROC_ERR);
   }
 }
@@ -384,6 +423,12 @@ static void* sys_read(int argc, void* argv[]) {
     return (void*)SYS_ERROR; // Can't read from output file so return -1
   }
 
+  /* Make sure [buffer, buffer+size) is loaded into frames and pinned.*/
+  if (!load_and_pin_user_buffer_pages(buffer, size, true)) {
+    exit_and_set_process_status(SYS_ERROR);
+    // return (void*)SYS_ERROR;
+  }
+
   if (fd == STDIN_FILENO) {
     for (uint32_t i = 0; i < size; i++) {
       ((char*)buffer)[i] = input_getc();
@@ -395,13 +440,15 @@ static void* sys_read(int argc, void* argv[]) {
     in it's properties */
   struct file* file = process_get_file(fd);
 
-  if (file == NULL)
+  if (file == NULL) {
+    unpin_user_buffer_pages(buffer, size);
     return (void*)SYS_ERROR; // If no file is found with given fd return -1
+  }
 
   lock_acquire(&global_file_lock);
   int bytes_read = file_read(file, buffer, size);
   lock_release(&global_file_lock);
-
+  unpin_user_buffer_pages(buffer, size);
   return (void*)bytes_read;
 }
 
@@ -510,14 +557,43 @@ static void* sys_tell(int argc, void* argv[]) {
 static void* sys_close(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
-  /* If the fd corresponds to input or output files we return
-     as we can't close them */
 
   int fd = (int)argv[0];
+
+  /* If the fd corresponds to input or output files we return
+    as we can't close them */
   if (fd < FD_BEGIN)
     return NULL;
 
   /* For any other case we close the file directly */
   process_close_file(fd);
+  return NULL;
+}
+
+/*
+ * Puts the segments of data in files in consecutive virtual
+ * addresses.
+ */
+static void* sys_mmap(int argc, void* argv[]) {
+  if (argc != 2)
+    return NULL;
+
+  int fd = (int)argv[0];
+  void* vaddr = (void*)argv[1];
+
+  return (void*)mmap_add_file(fd, vaddr);
+}
+
+/*
+ * Unmaps the mapping designated by mmap_id.
+ */
+static void* sys_munmap(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
+
+  uint32_t mmap_id = (int)argv[0];
+
+  mmap_destroy_entry_by_id(mmap_id);
+
   return NULL;
 }

@@ -8,6 +8,13 @@
 #include "threads/synch.h"
 #include "userprog/process.h"
 
+#define MAX_STACK_SIZE (1u << 23) /* 8 MB */
+
+#define VALID_STACK_ACCESS(paddr, esp)                                         \
+  ((uintptr_t)(paddr) < (uintptr_t)PHYS_BASE &&                                \
+   (uintptr_t)PHYS_BASE - (uintptr_t)pg_round_down(paddr) <= MAX_STACK_SIZE && \
+   (uintptr_t)(paddr) >= (uintptr_t)(esp) - 32)
+
 enum SPTE_KIND {
     SPTE_ANON,   /* Anon page (stack/heap/zero page) */
     SPTE_EXEC,   /* File-backed page from an executable (code/data segments) */
@@ -67,4 +74,11 @@ struct supp_page_table_entry* spt_add_mmap(struct supplemental_page_table*,
 void spt_remove(struct supplemental_page_table*, struct supp_page_table_entry*);
 void spt_set_frame(struct supp_page_table_entry*, struct frame*);
 void spt_clear_frame(struct supp_page_table_entry*);
-#endif VM_PAGE_H /* vm/page.h */
+void spt_print(struct supplemental_page_table*);
+
+bool lazy_load_page(struct supp_page_table_entry*);
+bool lazy_load_mmap_page(struct supp_page_table_entry*);
+bool grow_stack(void*, struct supplemental_page_table*);
+bool load_and_pin_user_buffer_pages(void*, unsigned, bool);
+void unpin_user_buffer_pages(void*, unsigned);
+#endif /* vm/page.h */

@@ -13,6 +13,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -45,6 +46,7 @@ static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static char** parse_cmd_line(const char*, int*);
 static void destroy_fd_table(struct hash_elem*, void*);
+static void spt_release_entry(struct hash_elem*, void*);
 
 /* child proc hash func */
 static unsigned hash_child_process(const struct hash_elem* e,
@@ -223,12 +225,18 @@ process_init (struct thread *t)
 
   /* Initialise process attributes. */
   process->pagedir = NULL;
+  struct supplemental_page_table* spt =
+      malloc(sizeof(struct supplemental_page_table));
+  spt_init(spt);
+  process->spt = spt;
   process->thread = t;
   hash_init(&process->children, hash_child_process, hash_less_child_process,
             NULL);
   process->exit_status = PROC_ERR;
   hash_init(&process->fd_table, hash_fd_table, hash_less_fd_table, NULL);
   process->next_fd = FD_BEGIN;
+  hash_init(&process->mmap_table, hash_mmap_table, hash_less_mmap_table, NULL);
+  process->next_mmap_id = 0;
 
   /* Initializing lock of process struct*/
   lock_init(&process->process_lock);
@@ -479,52 +487,93 @@ void process_exit(int exit_code) {
   hash_destroy(&cur->fd_table, destroy_fd_table);
   lock_release(&cur->process_lock);
 
+  /* Destroy all mmap entries and take the appropriate
+     freeing, file closing and writing actions while
+     doing so. Then destroy the table itself */
+  hash_destroy(&cur->mmap_table, destroy_mmap_table);
+
   uint32_t *pd;
   struct file *file;
   
   /* Clean up all process memory footprint, if it exists. */
-  if (cur != NULL)
-    {  
+  if (cur != NULL) {
 
-      /* Destroy the current process's page directory and switch back
-         to the kernel-only page directory. */
-      pd = cur->pagedir;
-      if (pd != NULL) 
-        {
-          /* Correct ordering here is crucial.  We must set
-             cur->pagedir to NULL before switching page directories,
-             so that a timer interrupt can't switch back to the
-             process page directory.  We must activate the base page
-             directory before destroying the process's page
-             directory, or our active page directory will be one
-             that's been freed (and cleared). */
-          cur->pagedir = NULL;
-          pagedir_activate (NULL);
-          pagedir_destroy (pd);
-        }
+    if (cur->spt != NULL) {
+      struct supplemental_page_table* spt = cur->spt;
 
-      /* Allow access to the current process's executable file if
-         the process is exit */
-        file = cur->executable;
-        if (file != NULL) {
-          lock_acquire(&global_file_lock);
-          /* Don't have to file allow write as file close does that
-             but left it to be explicit about intent */
-          file_allow_write(file);
-          file_close(file);
-          lock_release(&global_file_lock);
-          cur->executable = NULL;
-        }
-  
-      /* Finally, destroy the current process's struct */
-        printf("%s: exit(%d)\n", thread_current()->name, exit_code);
-        thread_current()->process = NULL;
-        free(cur);
+      /* release frames and swap slots for all SPTEs. */
+      lock_acquire(&spt->lock);
+      spt->page_map.aux = (void*)cur;
+      hash_apply(&spt->page_map, spt_release_entry);
+      lock_release(&spt->lock);
+
+      /* Then destroy the SPT. */
+      spt_destroy(spt);
+
+      /* Then destroy the SPT itself (frees SPTE structs). */
+      cur->spt = NULL;
+      /* If cur->spt was heap-allocated, free(cur->spt) here. */
     }
-    
+
+    /* Destroy the current process's page directory and switch back
+       to the kernel-only page directory. */
+    pd = cur->pagedir;
+    if (pd != NULL) {
+      /* Correct ordering here is crucial.  We must set
+         cur->pagedir to NULL before switching page directories,
+         so that a timer interrupt can't switch back to the
+         process page directory.  We must activate the base page
+         directory before destroying the process's page
+         directory, or our active page directory will be one
+         that's been freed (and cleared). */
+      cur->pagedir = NULL;
+      pagedir_activate(NULL);
+      pagedir_destroy(pd);
+    }
+
+    /* Allow access to the current process's executable file if
+       the process is exit */
+    file = cur->executable;
+    if (file != NULL) {
+      lock_acquire(&global_file_lock);
+      /* Don't have to file allow write as file close does that
+         but left it to be explicit about intent */
+      file_allow_write(file);
+      file_close(file);
+      lock_release(&global_file_lock);
+      cur->executable = NULL;
+    }
+
+    /* Finally, destroy the current process's struct */
+    printf("%s: exit(%d)\n", thread_current()->name, exit_code);
+    thread_current()->process = NULL;
+    free(cur);
+  }
+
   /* Now terminate the thread underlying this process. */
   thread_exit();
   NOT_REACHED ();
+}
+
+static void spt_release_entry(struct hash_elem* e, void* aux) {
+  struct supp_page_table_entry* spte =
+      hash_entry(e, struct supp_page_table_entry, elem);
+  struct process* proc = (struct process*)aux;
+
+  /* Drop this process's mapping to the frame. */
+  if (spte->frame != NULL) {
+    frame_free_mapping(spte->frame->k_addr, proc, spte->upage);
+    spte->frame = NULL;
+  }
+
+  /* Release swap slot, if any. */
+  if (spte->in_swap) {
+    // swap_free(spte->swap_slot); /* or your equivalent */
+    // spte->in_swap = false;
+  }
+
+  /* For MMAP pages, you may also want to do extra bookkeeping here
+     (e.g. write-back dirty pages) depending on your mmap design. */
 }
 
 /* Sets up the CPU for running user code in the current thread.
@@ -732,7 +781,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
+bool install_page(void* upage, void* kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -799,6 +848,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
+
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
@@ -809,45 +859,25 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
       struct process* cur_p = thread_current()->process;
-      /* Get a new page of memory. */
-      DBG("allocating frame memory with frame_alloc with upage %p\n", upage);
-      // uint8_t *kpage = palloc_get_page (PAL_USER);
-      uint8_t* kpage = frame_alloc(PAL_USER, FRAME_EXEC, cur_p, upage);
-      DBG("got kernel page addr %p\n", kpage);
-      DBG("updated frame table: \n");
-      frame_table_print();
-      if (kpage == NULL) {
+
+      if (!spt_add_exec(cur_p->spt, upage, file, ofs, page_read_bytes,
+                        page_zero_bytes, writable)) {
         return false;
       }
-      DBG("installing the page to process address space with install_page\n");
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-      {
-        // palloc_free_page (kpage);
-        frame_free_mapping(kpage, cur_p, upage);
-        return false; 
-      }     
-
-      /* Load data into the page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes){
-        return false; 
-      }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += page_read_bytes;
     }
   return true;
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool
-setup_stack (void **esp) 
-{
+static bool setup_stack(void** esp) {
   uint8_t *kpage;
   bool success = false;
 
@@ -859,9 +889,17 @@ setup_stack (void **esp)
 
   if (kpage != NULL) {
     success = install_page(upage, kpage, true);
-    if (success)
+    if (success) {
+      struct process* p = thread_current()->process;
+      struct supp_page_table_entry* spte =
+          spt_add_anon(p->spt, upage, true, true);
+
+      if (spte != NULL) {
+        struct frame* f = frame_lookup(kpage);
+        spt_set_frame(spte, f);
+      }
       *esp = PHYS_BASE;
-    else
+    } else
       // palloc_free_page(kpage);
       frame_free_mapping(kpage, cur_proc, upage);
   }
@@ -877,9 +915,7 @@ setup_stack (void **esp)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool
-install_page (void *upage, void *kpage, bool writable)
-{
+bool install_page(void* upage, void* kpage, bool writable) {
   struct process *cur = thread_current ()->process;
 
   /* Verify that there's not already a page at that virtual

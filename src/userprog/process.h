@@ -5,6 +5,8 @@
 #include "syscall.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "vm/mmap.h"
+#include "vm/page.h"
 
 #define PROC_SUCC (0)  /* Exit code for normal process termination. */
 #define PROC_ERR (-1)  /* Exit code for erroneous process termination. */
@@ -14,6 +16,7 @@ typedef int pid_t;
 /* A user process, wrapped around a kernel thread. */
 struct process {
   uint32_t* pagedir;          /* Process page directory. */
+  struct supplemental_page_table* spt;
   struct thread* thread;      /* Process underlying kernel thread. */
   struct file* executable;    /* Process executable file */
   struct hash fd_table;       /* Hashmap that contains fd file pairs */
@@ -24,6 +27,9 @@ struct process {
   struct lock process_lock;   /* Per process lock. */
   struct semaphore wait_sema; /* Semaphore for the children processes the
                                  process is waiting for. */
+
+  uint32_t next_mmap_id;
+  struct hash mmap_table;
 };
 
 struct child_process {
@@ -50,4 +56,5 @@ int process_add_file(struct file *f);
 void process_close_file(int fd);
 void process_close_all_files(void);
 
+bool install_page(void* upage, void* kpage, bool writable);
 #endif /* userprog/process.h */

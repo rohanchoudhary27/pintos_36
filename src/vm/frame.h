@@ -24,6 +24,7 @@ struct frame {
   enum FRAME_KIND f_kind;             /* Frame kind */
   struct list process_frame_mappings; /* List of processes that own the frame */
   struct hash_elem elem;
+  struct list_elem clock_elem; // Clock list elem
 };
 
 struct process_frame_mapping {

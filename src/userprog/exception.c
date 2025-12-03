@@ -1,10 +1,30 @@
 #include "userprog/exception.h"
-#include <inttypes.h>
-#include <stdio.h>
-#include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/gdt.h"
 #include "userprog/process.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#define DEBUG_PC 1
+
+#ifdef DEBUG_PC
+
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
+           ##__VA_ARGS__);                                                     \
+  } while (0)
+#else
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+  } while (0)
+#endif
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -145,14 +165,41 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
-}
+  struct thread* curr = thread_current();
 
+  struct supplemental_page_table* spt = curr->process->spt;
+
+  /* The spt_lookup function uses the spt lock inside. */
+  struct supp_page_table_entry* spte = spt_lookup(spt, fault_addr);
+
+  bool success = true;
+
+  if (fault_addr == NULL || !is_user_vaddr(fault_addr) || !not_present)
+    success = false;
+
+  if (success) { /* The page is not present */
+    if (spte != NULL) {
+      if (spte->kind == SPTE_EXEC && spte->file != NULL)
+        success = lazy_load_page(spte);
+      else if (spte->kind == SPTE_MMAP && spte->file != NULL)
+        success = lazy_load_mmap_page(spte);
+      else if (spte->in_swap)
+        // ... implement swapping thing here
+        success = true;
+      else
+        success = false;
+    } else if (VALID_STACK_ACCESS(fault_addr,
+                                  (user ? f->esp : curr->user_esp))) {
+      success = grow_stack(fault_addr, spt);
+    } else {
+      success = false;
+    }
+  }
+
+  if (!success) {
+    printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
+           not_present ? "not present" : "rights violation",
+           write ? "writing" : "reading", user ? "user" : "kernel");
+    kill(f);
+  }
+}

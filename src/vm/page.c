@@ -1,5 +1,6 @@
 #include "vm/page.h"      /* for SPT structs + prototypes */
 #include "devices/swap.h" /* later, when you integrate swap */
+#include "filesys/file.h"
 #include "lib/kernel/hash.h"
 #include "threads/malloc.h"
 #include "threads/palloc.h"
@@ -8,6 +9,23 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "vm/frame.h" /* for struct frame */
+#include <stdio.h>
+#include <string.h>
+
+#define DEBUG_PC 1
+
+#ifdef DEBUG_PC
+
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
+           ##__VA_ARGS__);                                                     \
+  } while (0)
+#else
+#define DBG(fmt, ...)                                                          \
+  do {                                                                         \
+  } while (0)
+#endif
 
 /* ----------------------------------------------------------------------
  *  Hash helpers
@@ -251,4 +269,250 @@ void spt_set_frame(struct supp_page_table_entry* spte, struct frame* frame) {
 void spt_clear_frame(struct supp_page_table_entry* spte) {
   ASSERT(spte != NULL);
   spte->frame = NULL;
+}
+
+void spt_print(struct supplemental_page_table* spt) {
+  ASSERT(spt != NULL);
+
+  lock_acquire(&spt->lock);
+
+  printf(
+      "\n==================== SUPPLEMENTAL PAGE TABLE ====================\n");
+  printf("%-12s %-8s %-9s %-10s %-10s  %-10s %-10s %-10s\n", "upage", "kind",
+         "writable", "in_frame", "in_swap", "file_ofs", "read_bytes",
+         "zero_bytes");
+
+  if (hash_empty(&spt->page_map)) {
+    printf("[no entries]\n");
+    printf("================================================================="
+           "\n\n");
+    lock_release(&spt->lock);
+    return;
+  }
+
+  struct hash_iterator it;
+  hash_first(&it, &spt->page_map);
+
+  while (hash_next(&it)) {
+    struct supp_page_table_entry* spte =
+        hash_entry(hash_cur(&it), struct supp_page_table_entry, elem);
+
+    const char* kind_str = spte->kind == SPTE_EXEC   ? "EXEC"
+                           : spte->kind == SPTE_ANON ? "ANON"
+                           : spte->kind == SPTE_MMAP ? "MMAP"
+                                                     : "UNK";
+
+    const char* frame_str = spte->frame ? "yes" : "no";
+
+    printf("%p  %-8s %-9s %-10s %-10s", spte->upage, kind_str,
+           spte->writable ? "true" : "false", frame_str,
+           spte->in_swap ? "true" : "false");
+
+    /* For EXEC/MMAP pages, show file metadata. */
+    if (spte->kind == SPTE_EXEC || spte->kind == SPTE_MMAP) {
+      printf("  %-10d %-10zu %-10zu", (int)spte->file_offset, spte->read_bytes,
+             spte->zero_bytes);
+    } else {
+      /* For ANON pages, we can print placeholders. */
+      printf("  %-10s %-10s %-10s", "-", "-", "-");
+    }
+
+    printf("\n");
+
+    /* If page is mapped in a frame, print the frame address too. */
+    if (spte->frame) {
+      printf("          -> frame kaddr: %p\n", spte->frame->k_addr);
+    }
+  }
+
+  printf(
+      "=================================================================\n\n");
+
+  lock_release(&spt->lock);
+}
+
+/* ----------------------------------------------------------------------
+ *  Task 3 functions -- Lazy Loading, Stack Growth
+ * --------------------------------------------------------------------*/
+
+bool lazy_load_page(struct supp_page_table_entry* spte) {
+  struct process* p = thread_current()->process;
+  void* upage = spte->upage;
+
+  void* kpage;
+  if (spte->kind != SPTE_EXEC)
+    return false;
+
+  bool success = true;
+
+  /* Check for file-backed SPTE */
+  if (spte->file == NULL ||
+      !(spte->kind == SPTE_EXEC || spte->kind == SPTE_MMAP)) {
+    return false;
+  }
+
+  ASSERT(spte->file != NULL);
+
+  if (spte->zero_bytes == PGSIZE) { /* Do not read the file if it's all zeros */
+    kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_EXEC, p, upage);
+    if (kpage == NULL)
+      return false;
+  } else {
+    kpage = frame_alloc(PAL_USER, FRAME_EXEC, p, upage);
+    if (kpage == NULL)
+      return false;
+
+    file_seek(spte->file, spte->file_offset);
+
+    int bytes_read = file_read(spte->file, kpage, spte->read_bytes);
+
+    if (bytes_read != (int)spte->read_bytes)
+      success = false;
+    memset(kpage + bytes_read, 0, spte->zero_bytes);
+  }
+
+  if (!success) {
+    frame_free_mapping(kpage, p, upage);
+    return false;
+  }
+  if (!install_page(upage, kpage, spte->writable)) {
+    frame_free_mapping(kpage, p, upage);
+    return false;
+  }
+
+  struct frame* f = frame_lookup(kpage);
+  spt_set_frame(spte, f);
+  spte->in_swap = false;
+  return true;
+}
+
+bool lazy_load_mmap_page(struct supp_page_table_entry* spte) {
+  struct process* p = thread_current()->process;
+  void* upage = spte->upage;
+
+  void* kpage;
+  if (spte->kind != SPTE_MMAP)
+    return false;
+
+  bool success = true;
+
+  /* Check for file-backed SPTE ASK EGE ABOUT THIS ~BARAY */
+  if (spte->file == NULL ||
+      !(spte->kind == SPTE_EXEC || spte->kind == SPTE_MMAP)) {
+    return false;
+  }
+
+  ASSERT(spte->file != NULL);
+
+  if (spte->zero_bytes == PGSIZE) { /* Do not read the file if it's all zeros */
+    kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_EXEC, p, upage);
+    if (kpage == NULL)
+      return false;
+  } else {
+    kpage = frame_alloc(PAL_USER, FRAME_EXEC, p, upage);
+    if (kpage == NULL)
+      return false;
+
+    file_seek(spte->file, spte->file_offset);
+
+    int bytes_read = file_read(spte->file, kpage, spte->read_bytes);
+
+    if (bytes_read != (int)spte->read_bytes)
+      success = false;
+    memset(kpage + bytes_read, 0, spte->zero_bytes);
+  }
+
+  if (!success) {
+    frame_free_mapping(kpage, p, upage);
+    return false;
+  }
+  if (!install_page(upage, kpage, spte->writable)) {
+    frame_free_mapping(kpage, p, upage);
+    return false;
+  }
+
+  struct frame* f = frame_lookup(kpage);
+  spt_set_frame(spte, f);
+  spte->in_swap = false;
+  return true;
+}
+
+/*
+TODO: the slides say Beware: as with any other page, the stack can be swapped
+out does this mean if it's in a swap slot it should be brought back? idk
+*/
+bool grow_stack(void* fault_addr, struct supplemental_page_table* spt) {
+  struct process* p = thread_current()->process;
+  void* upage = pg_round_down(fault_addr);
+
+  struct supp_page_table_entry* new_spte = spt_add_anon(spt, upage, true, true);
+  if (new_spte == NULL)
+    return false;
+
+  void* kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_ANON, p, upage);
+  if (kpage == NULL) {
+    spt_remove(spt, new_spte);
+    return false;
+  }
+
+  struct frame* f = frame_lookup(kpage);
+  spt_set_frame(new_spte, f);
+
+  if (!install_page(upage, kpage, new_spte->writable)) {
+    spt_remove(spt, new_spte);
+    frame_free_mapping(kpage, p, upage);
+    return false;
+  }
+  return true;
+}
+
+bool load_and_pin_user_buffer_pages(void* buffer, unsigned size,
+                                    bool for_write) {
+  if (size == 0)
+    return true;
+
+  struct process* p = thread_current()->process;
+  struct supplemental_page_table* spt = p->spt;
+
+  uint8_t* start = pg_round_down(buffer);
+  uint8_t* end = pg_round_down((uint8_t*)buffer + size - 1);
+
+  for (uint8_t* upage = start; upage <= end; upage += PGSIZE) {
+    struct supp_page_table_entry* spte = spt_lookup(spt, upage);
+    if (spte == NULL)
+      return false;
+
+    if (for_write && !spte->writable)
+      return false;
+
+    if (spte->frame == NULL) { // not in frame yet, demand load
+      if (spte->kind == SPTE_EXEC || spte->kind == SPTE_MMAP) {
+        if (!lazy_load_page(spte))
+          return false;
+      } else if (spte->kind == SPTE_ANON && spte->in_swap) {
+        // TODO: get from swap
+        return false;
+      }
+    }
+    ASSERT(spte->frame != NULL); // now we should load it in memory
+    frame_pin(spte->frame->k_addr);
+  }
+  return true;
+}
+
+void unpin_user_buffer_pages(void* buffer, unsigned size) {
+  if (size == 0)
+    return;
+
+  struct process* p = thread_current()->process;
+  struct supplemental_page_table* spt = p->spt;
+
+  uint8_t* start = pg_round_down(buffer);
+  uint8_t* end = pg_round_down((uint8_t*)buffer + size - 1);
+
+  for (uint8_t* upage = start; upage <= end; upage += PGSIZE) {
+    struct supp_page_table_entry* spte = spt_lookup(spt, upage);
+    if (spte != NULL && spte->frame != NULL) // already in frame
+      frame_unpin(spte->frame->k_addr);
+  }
 }
