@@ -518,7 +518,7 @@ void process_exit(int exit_code) {
 
         lock_acquire(&read_only_page_table.lock);
         struct hash_iterator i;
-        hash_first(&i, &cur->spt);
+        hash_first(&i, &cur->spt->page_map);
         while (hash_next(&i)) {
           struct supp_page_table_entry* p =
               hash_entry(hash_cur(&i), struct supp_page_table_entry, elem);

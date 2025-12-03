@@ -60,11 +60,12 @@ struct read_only_table {
   struct lock lock;
 };
 
+struct read_only_table read_only_page_table;
+
 struct read_only_entry {
   struct file* file;
   off_t offset;
-  void* page;
-  // Note we dont care which process is referencing it
+  void* k_addr; // virtual address of the frame
   int reference_count;
   struct hash_elem elem;
 };
@@ -96,8 +97,9 @@ bool grow_stack(void*, struct supplemental_page_table*);
 bool load_and_pin_user_buffer_pages(void*, unsigned);
 void unpin_user_buffer_pages(void*, unsigned);
 
-unsigned hash_read_only_table(const struct hash_elem*, void*);
-bool hash_less_read_only_table(const struct hash_elem*, const struct hash_elem*,
-                               void*);
-extern struct read_only_table read_only_page_table;
+void shared_page_init(void);
+void* shared_page_lookup(struct file* file, off_t offset);
+void shared_page_ref_inc(struct file* file, off_t offset);
+void shared_page_ref_dec(struct file* file, off_t offset);
+
 #endif /* vm/page.h */

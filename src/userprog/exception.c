@@ -1,8 +1,10 @@
 #include "userprog/exception.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/frame.h"
 #include "vm/page.h"
@@ -179,24 +181,34 @@ page_fault (struct intr_frame *f)
 
   if (success) { /* The page is not present */
     if (spte != NULL) {
-      if (spte->kind == SPTE_EXEC && spte->file != NULL)
+      if (spte->kind == SPTE_EXEC && spte->file != NULL) {
         success = lazy_load_page(spte);
-      // Read only file sharing - should happen if page is successefully loaded
-      if (success) {
-        struct file* file = spte->file;
-        off_t offset = spte->file_offset;
-
+        // Read only file sharing - should happen if page is successefully
+        // loaded
         lock_acquire(&read_only_page_table.lock);
-        if (shared_page_lookup(file, offset) != NULL) {
-          shared_page_ref_inc(file, offset);
+        void* existing_k_addr =
+            shared_page_lookup(spte->file, spte->file_offset);
+        if (existing_k_addr != NULL) {
+          success =
+              frame_add_mapping(existing_k_addr, curr->process, fault_addr);
+          if (success) {
+            pagedir_set_page(curr->process->pagedir, fault_addr,
+                             spte->frame->k_addr, false);
+            shared_page_ref_inc(spte->file, spte->file_offset);
+            spte->frame = frame_lookup(existing_k_addr);
+          }
         } else {
-          struct read_only_entry* new_entry =
-              malloc(sizeof(struct read_only_entry*));
-          new_entry->file = file;
-          new_entry->offset = offset;
-          new_entry->page = fault_addr; // page addr is fault addr
-          new_entry->reference_count = 1;
-          hash_insert(&read_only_page_table, &new_entry->elem);
+          success = lazy_load_page(spte);
+          if (success) {
+            struct read_only_entry* new_entry =
+                malloc(sizeof(struct read_only_entry));
+            new_entry->file = spte->file;
+            new_entry->offset = spte->file_offset;
+            new_entry->k_addr = spte->frame->k_addr;
+            new_entry->reference_count = 1;
+            hash_insert(&read_only_page_table.read_only_table,
+                        &new_entry->elem);
+          }
         }
         lock_release(&read_only_page_table.lock);
       } else if (spte->in_swap)
