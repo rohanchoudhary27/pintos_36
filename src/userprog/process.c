@@ -77,6 +77,25 @@ static bool hash_less_fd_table(const struct hash_elem* a,
   return (file_desc_a->fd < file_desc_b->fd);
 }
 
+/* Hash calculation function for mmap table. */
+static unsigned hash_mmap_table(const struct hash_elem* e, void* aux UNUSED) {
+  struct mmap_entry* mmap_entry = hash_entry(e, struct mmap_entry, elem);
+  return hash_int(mmap_entry->mmap_id);
+}
+
+/* Comparison function for mmap table. */
+static bool hash_less_mmap_table(const struct hash_elem* a,
+                                 const struct hash_elem* b, void* aux UNUSED) {
+  struct mmap_entry* mmap_entry_a = hash_entry(a, struct mmap_entry, elem);
+  struct mmap_entry* mmap_entry_b = hash_entry(b, struct mmap_entry, elem);
+  return (mmap_entry_a->mmap_id < mmap_entry_b->mmap_id);
+}
+
+static void destroy_mmap_table(struct hash_elem* e, void* aux UNUSED) {
+  struct mmap_entry* mmap_entry = hash_entry(e, struct mmap_entry, elem);
+  free(mmap_entry);
+}
+
 /* Initialises the main thread as a minimal root OS process.
    Note that when this thread/process terminates, the OS will shutdown. */
 void
@@ -234,6 +253,8 @@ process_init (struct thread *t)
   process->exit_status = PROC_ERR;
   hash_init(&process->fd_table, hash_fd_table, hash_less_fd_table, NULL);
   process->next_fd = FD_BEGIN;
+  hash_init(&process->mmap_table, hash_mmap_table, hash_less_mmap_table, NULL);
+  process->next_mmap_id = 0;
 
   /* Initializing lock of process struct*/
   lock_init(&process->process_lock);
@@ -483,6 +504,8 @@ void process_exit(int exit_code) {
   lock_acquire(&cur->process_lock);
   hash_destroy(&cur->fd_table, destroy_fd_table);
   lock_release(&cur->process_lock);
+
+  hash_destroy(&cur->mmap_table, destroy_mmap_table);
 
   uint32_t *pd;
   struct file *file;

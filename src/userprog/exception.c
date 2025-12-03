@@ -181,6 +181,8 @@ page_fault (struct intr_frame *f)
     if (spte != NULL) {
       if (spte->kind == SPTE_EXEC && spte->file != NULL)
         success = lazy_load_page(spte);
+      else if (spte->kind == SPTE_MMAP && spte->file != NULL)
+        success = lazy_load_mmap_page(spte);
       else if (spte->in_swap)
         // ... implement swapping thing here
         success = true;

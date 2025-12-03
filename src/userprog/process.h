@@ -26,6 +26,9 @@ struct process {
   struct lock process_lock;   /* Per process lock. */
   struct semaphore wait_sema; /* Semaphore for the children processes the
                                  process is waiting for. */
+
+  uint32_t next_mmap_id;
+  struct hash mmap_table;
 };
 
 struct child_process {

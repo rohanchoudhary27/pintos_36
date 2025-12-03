@@ -18,6 +18,8 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 
+typedef int32_t mmapid_t;
+
 #define DEBUG_PC 1
 
 #ifdef DEBUG_PC
@@ -167,7 +169,7 @@ static void validate_string(const char* s) {
 }
 
 /*
- * Checks if a user-supplied address is valid and mapped.
+ * Checks if a user-supplied address is valid.
  * Terminates the process if the address is NULL, not in user space,
  * or not mapped in the page directory.
  */
@@ -546,14 +548,174 @@ static void* sys_tell(int argc, void* argv[]) {
 static void* sys_close(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
-  /* If the fd corresponds to input or output files we return
-     as we can't close them */
 
   int fd = (int)argv[0];
+
+  /* If the fd corresponds to input or output files we return
+    as we can't close them */
   if (fd < FD_BEGIN)
     return NULL;
 
   /* For any other case we close the file directly */
   process_close_file(fd);
   return NULL;
+}
+
+/*
+ * Puts the segments of data in files in consecutive virtual
+ * addresses.
+ */
+mmapid_t mmap(int argc, void* argv[]) {
+  if (argc != 2)
+    return NULL;
+
+  int fd = (int)argv[0];
+  void* addr = (void*)argv[1];
+
+  struct process* cur_process = thread_current()->process;
+  int mmap_id = cur_process->next_mmap_id++;
+
+  /* ----------------------------------------------------------------------
+   *  Syscall Error Checks
+   * --------------------------------------------------------------------*/
+
+  // Check if its in user vaddr
+  if (!is_user_vaddr(addr)) {
+    return SYS_ERROR;
+  }
+
+  // Fail if addr is not page aligned or addr equals to 0
+  if ((uintptr_t)addr % PGSIZE || (uintptr_t)addr == 0) {
+    return SYS_ERROR;
+  }
+
+  // STDIO streams cannot be mapped so fail if their fd's are given
+  if (fd < FD_BEGIN) {
+    return SYS_ERROR;
+  }
+
+  // For any other case set the position on files
+  struct file* tmp_file = process_get_file(fd);
+  if (tmp_file == NULL) { // Return if the file is NULL
+    return SYS_ERROR;
+  }
+
+  /* We reopen the file in order to not lose it if the process
+     closes the original file. */
+  struct file* file = file_reopen(tmp_file);
+  if (file == NULL) {
+    return SYS_ERROR; // If we get null return error.
+  }
+
+  int cur_file_length = file_length(file);
+
+  // If file we are mapping has length 0 fail immediately
+  if (cur_file_length == 0) {
+    return SYS_ERROR;
+  }
+
+  // Make sure we don't go in stack reserved territory in memory
+  if (addr + cur_file_length >= PHYS_BASE - MAX_STACK_SIZE) {
+    return SYS_ERROR;
+  }
+
+  struct process* current_process = thread_current()->process;
+  struct supplemental_page_table* spt = current_process->spt;
+
+  // Find if there is something else mapped on these pages
+  for (uintptr_t i = 0; i < cur_file_length; i += PGSIZE) {
+    if (spt_lookup(spt, addr + i) != NULL) { // The addr is occupied
+      return SYS_ERROR; // Then we can't mmap here so return SYS_ERROR
+    }
+  }
+
+  /* ----------------------------------------------------------------------
+   *  Map File to Virtual Address and Add to
+   * --------------------------------------------------------------------*/
+
+  /* Pass a new entry to mmap_table */
+  struct mmap_entry* new_entry = malloc(sizeof *new_entry);
+  new_entry->mmap_id = mmap_id;
+  new_entry->vaddr = addr;
+  new_entry->page_count = (cur_file_length % PGSIZE)
+                              ? cur_file_length / PGSIZE + 1
+                              : cur_file_length / PGSIZE;
+  new_entry->file = file;
+
+  hash_insert(&cur_process->mmap_table, new_entry);
+
+  /* Loop through all full pages we need to add to virtual memory */
+  uintptr_t i;
+  for (i = 0; i < cur_file_length; i += PGSIZE) {
+    /* TODO: CHECK FOR NULL CASES */
+    spt_add_mmap(cur_process->spt, // The current process' spt
+                 addr + i,         // The address of the current page added
+                 file,             // The original file this data is taken from
+                 i,                // The offset is i
+                 PGSIZE, // Any page in the for loop will be full of data
+                 0,    // Thus any page in the for loop will not have zero_bytes
+                 true, // mmaps are always writable
+                 mmap_id // Id of the mmap
+    );
+  }
+
+  /* Only do this code if there is still unadded data left */
+  if (i % PGSIZE != 0) {
+    /* Add the only page which has zero_bytes in it
+      This wasn't touched in the for loop.         */
+    spt_add_mmap(cur_process->spt, // The current process' spt
+                 addr + i,         // The address of the current page added
+                 file,             // The original file this data is taken from
+                 i,                // The offset is i
+                 cur_file_length %
+                     PGSIZE, // Adding the only non page sized data from file
+                 PGSIZE - (cur_file_length %
+                           PGSIZE), // Rest of bytes in page are zero_bytes
+                 true,              // mmaps are always writable
+                 mmap_id            // Id of the mmap
+    );
+  }
+}
+
+/*
+ * Unmaps the mapping designated by mmap_id.
+ */
+void munmap(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
+
+  uint32_t mmap_id = (int)argv[0];
+
+  struct process* cur_process = thread_current()->process;
+
+  struct mmap_entry mock_entry;
+  mock_entry.mmap_id = mmap_id;
+  struct hash_elem* e = hash_find(&cur_process->mmap_table, &mock_entry);
+  if (e == NULL)
+    return;
+
+  struct mmap_entry* mmap_entry = hash_entry(e, struct mmap_entry, elem);
+
+  intptr_t cur_vaddr = mmap_entry->vaddr;
+  for (uint32_t j = 0; j < mmap_entry->page_count; j++, cur_vaddr += PGSIZE) {
+    struct supp_page_table_entry* spte =
+        spt_lookup(&cur_process->spt, cur_vaddr);
+
+    if (spte == NULL)
+      continue;
+
+    /* If the page is in a frame (in memory) */
+    if (spte->frame != NULL) {
+      void* kpage = spte->frame->k_addr;
+
+      if (pagedir_is_dirty(cur_process->pagedir, cur_vaddr)) {
+        file_write_at(spte->file, kpage, spte->read_bytes, spte->file_offset);
+      }
+
+      pagedir_clear_page(cur_process->pagedir, cur_vaddr);
+      frame_free(kpage);
+    }
+
+    spt_remove(&cur_process->spt, spte);
+  }
 }

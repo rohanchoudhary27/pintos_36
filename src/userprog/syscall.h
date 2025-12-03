@@ -25,6 +25,15 @@ struct file_desc {
   struct hash_elem elem;
 };
 
+/* Struct to store in mmap_table in processes */
+struct mmap_entry {
+  uint32_t mmap_id;
+  intptr_t vaddr;
+  uint32_t page_count;
+  struct file* file;
+  struct hash_elem elem;
+};
+
 struct lock global_file_lock;
 
 void syscall_init(void);
