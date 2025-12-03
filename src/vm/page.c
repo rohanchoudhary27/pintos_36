@@ -368,6 +368,59 @@ void spt_print(struct supplemental_page_table* spt) {
 }
 
 /* ----------------------------------------------------------------------
+ *  Read-Only Page Table Lifecycle (Global)
+ * --------------------------------------------------------------------*/
+
+void* shared_page_lookup(
+    struct read_only_table*
+        read_only_table, // Remember to change this once global
+    struct file* file, off_t offset) {
+  ASSERT(file != NULL)
+  struct read_only_entry key;
+  key.file = file;
+  key.offset = offset;
+
+  struct hash_elem* e = hash_find(&read_only_table->read_only_table, &key.elem);
+
+  if (e != NULL) {
+    struct read_only_entry* entry = hash_entry(e, struct read_only_entry, elem);
+    return entry->page;
+  }
+  return NULL;
+}
+
+void shared_page_ref_inc(struct read_only_table* read_only_table,
+                         struct file* file, off_t offset, void* frame) {
+  struct read_only_entry key;
+  key.file = file;
+  key.offset = offset;
+
+  struct hash_elem* e = hash_find(&read_only_table->read_only_table, &key.elem);
+  if (e != NULL) {
+    struct read_only_entry* entry = hash_entry(e, struct read_only_entry, elem);
+    entry->reference_count++;
+  }
+}
+
+void shared_page_ref_dec(struct read_only_table* read_only_table,
+                         struct file* file, off_t offset) {
+  struct read_only_entry key;
+  key.file = file;
+  key.offset = offset;
+
+  struct hash_elem* e = hash_find(&read_only_table->read_only_table, &key.elem);
+  if (e != NULL) {
+    struct read_only_entry* entry = hash_entry(e, struct read_only_entry, elem);
+    entry->reference_count--;
+
+    if (entry->reference_count == 0) {
+      hash_delete(&read_only_table, &entry->elem);
+      free(entry);
+    }
+  }
+}
+
+/* ----------------------------------------------------------------------
  *  Task 3 functions -- Lazy Loading, Stack Growth
  * --------------------------------------------------------------------*/
 
