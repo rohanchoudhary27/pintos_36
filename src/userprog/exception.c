@@ -182,7 +182,6 @@ page_fault (struct intr_frame *f)
   if (success) { /* The page is not present */
     if (spte != NULL) {
       if (spte->kind == SPTE_EXEC && spte->file != NULL) {
-        success = lazy_load_page(spte);
         // Read only file sharing - should happen if page is successefully
         // loaded
         lock_acquire(&read_only_page_table.lock);
