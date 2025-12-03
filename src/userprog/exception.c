@@ -198,7 +198,7 @@ page_fault (struct intr_frame *f)
           }
         } else {
           success = lazy_load_page(spte);
-          if (success) {
+          if (success && !spte->writable) {
             struct read_only_entry* new_entry =
                 malloc(sizeof(struct read_only_entry));
             new_entry->file = spte->file;
