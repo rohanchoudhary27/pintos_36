@@ -515,6 +515,8 @@ void process_exit(int exit_code) {
         // single page For every single page, we then alter the hash of the
         // shared_page_ref (which is not being iterated through so it can be
         // deleted).
+
+        lock_acquire(&read_only_page_table.lock);
         struct hash_iterator i;
         hash_first(&i, &cur->spt);
         while (hash_next(&i)) {
@@ -523,6 +525,8 @@ void process_exit(int exit_code) {
 
           shared_page_ref_dec(p->file, p->file_offset);
         }
+
+        lock_release(&read_only_page_table.lock);
 
         /* Allow access to the current process's executable file if
            the process is exit */

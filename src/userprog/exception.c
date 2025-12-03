@@ -185,6 +185,8 @@ page_fault (struct intr_frame *f)
       if (success) {
         struct file* file = spte->file;
         off_t offset = spte->file_offset;
+
+        lock_acquire(&read_only_page_table.lock);
         if (shared_page_lookup(file, offset) != NULL) {
           shared_page_ref_inc(file, offset);
         } else {
@@ -196,6 +198,7 @@ page_fault (struct intr_frame *f)
           new_entry->reference_count = 1;
           hash_insert(&read_only_page_table, &new_entry->elem);
         }
+        lock_release(&read_only_page_table.lock);
       } else if (spte->in_swap)
         // ... implement swapping thing here
         success = true;
