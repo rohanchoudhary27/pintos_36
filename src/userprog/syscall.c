@@ -701,7 +701,7 @@ static void* munmap(int argc, void* argv[]) {
   mock_entry.mmap_id = mmap_id;
   struct hash_elem* e = hash_find(&cur_process->mmap_table, &mock_entry.elem);
   if (e == NULL)
-    return;
+    return NULL;
 
   struct mmap_entry* mmap_entry = hash_entry(e, struct mmap_entry, elem);
 
@@ -717,6 +717,7 @@ static void* munmap(int argc, void* argv[]) {
     if (spte->frame != NULL) {
       void* kpage = spte->frame->k_addr;
 
+      // TODO: Maybe check this part again later.
       if (pagedir_is_dirty(cur_process->pagedir, cur_vaddr)) {
         file_write_at(spte->file, kpage, spte->read_bytes, spte->file_offset);
       }
@@ -727,4 +728,10 @@ static void* munmap(int argc, void* argv[]) {
 
     spt_remove(&cur_process->spt, spte);
   }
+
+  hash_delete(&cur_process->mmap_table, &mmap_entry->elem);
+  file_close(&mmap_entry->file);
+  free(mmap_entry);
+
+  return NULL;
 }
