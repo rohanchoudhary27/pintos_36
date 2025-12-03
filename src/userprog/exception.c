@@ -181,7 +181,22 @@ page_fault (struct intr_frame *f)
     if (spte != NULL) {
       if (spte->kind == SPTE_EXEC && spte->file != NULL)
         success = lazy_load_page(spte);
-      else if (spte->in_swap)
+      // Read only file sharing - should happen if page is successefully loaded
+      if (success) {
+        struct file* file = spte->file;
+        off_t offset = spte->file_offset;
+        if (shared_page_lookup(file, offset) != NULL) {
+          shared_page_ref_inc(file, offset);
+        } else {
+          struct read_only_entry* new_entry =
+              malloc(sizeof(struct read_only_entry*));
+          new_entry->file = file;
+          new_entry->offset = offset;
+          new_entry->page = fault_addr; // page addr is fault addr
+          new_entry->reference_count = 1;
+          hash_insert(&read_only_page_table, &new_entry->elem);
+        }
+      } else if (spte->in_swap)
         // ... implement swapping thing here
         success = true;
       else

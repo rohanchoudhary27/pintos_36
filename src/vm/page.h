@@ -57,6 +57,7 @@ struct supp_page_table_entry {
 /* Global read only table */
 struct read_only_table {
   struct hash read_only_table;
+  struct lock lock;
 };
 
 struct read_only_entry {
@@ -94,4 +95,9 @@ bool lazy_load_page(struct supp_page_table_entry*);
 bool grow_stack(void*, struct supplemental_page_table*);
 bool load_and_pin_user_buffer_pages(void*, unsigned);
 void unpin_user_buffer_pages(void*, unsigned);
+
+unsigned hash_read_only_table(const struct hash_elem*, void*);
+bool hash_less_read_only_table(const struct hash_elem*, const struct hash_elem*,
+                               void*);
+extern struct read_only_table read_only_page_table;
 #endif /* vm/page.h */
