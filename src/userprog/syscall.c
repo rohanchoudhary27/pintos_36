@@ -565,7 +565,7 @@ static void* sys_close(int argc, void* argv[]) {
  * Puts the segments of data in files in consecutive virtual
  * addresses.
  */
-mmapid_t mmap(int argc, void* argv[]) {
+static void* mmap(int argc, void* argv[]) {
   if (argc != 2)
     return NULL;
 
@@ -581,42 +581,46 @@ mmapid_t mmap(int argc, void* argv[]) {
 
   // Check if its in user vaddr
   if (!is_user_vaddr(addr)) {
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
   }
 
   // Fail if addr is not page aligned or addr equals to 0
   if ((uintptr_t)addr % PGSIZE || (uintptr_t)addr == 0) {
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
   }
 
   // STDIO streams cannot be mapped so fail if their fd's are given
   if (fd < FD_BEGIN) {
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
   }
 
   // For any other case set the position on files
   struct file* tmp_file = process_get_file(fd);
   if (tmp_file == NULL) { // Return if the file is NULL
-    return SYS_ERROR;
+    return (void*)SYS_ERROR;
   }
 
   /* We reopen the file in order to not lose it if the process
-     closes the original file. */
+     closes the original file. ANY FAILURE AFTER THIS POINT
+     MUST CLOSE THIS FILE. */
   struct file* file = file_reopen(tmp_file);
   if (file == NULL) {
-    return SYS_ERROR; // If we get null return error.
+    return (void*)SYS_ERROR; // If we get null return error.
   }
 
   int cur_file_length = file_length(file);
+  int page_count = (cur_file_length + PGSIZE - 1) / PGSIZE;
 
   // If file we are mapping has length 0 fail immediately
   if (cur_file_length == 0) {
-    return SYS_ERROR;
+    file_close(file);
+    return (void*)SYS_ERROR;
   }
 
   // Make sure we don't go in stack reserved territory in memory
-  if (addr + cur_file_length >= PHYS_BASE - MAX_STACK_SIZE) {
-    return SYS_ERROR;
+  if (addr + page_count * PGSIZE >= PHYS_BASE - MAX_STACK_SIZE) {
+    file_close(file);
+    return (void*)SYS_ERROR;
   }
 
   struct process* current_process = thread_current()->process;
@@ -625,7 +629,8 @@ mmapid_t mmap(int argc, void* argv[]) {
   // Find if there is something else mapped on these pages
   for (uintptr_t i = 0; i < cur_file_length; i += PGSIZE) {
     if (spt_lookup(spt, addr + i) != NULL) { // The addr is occupied
-      return SYS_ERROR; // Then we can't mmap here so return SYS_ERROR
+      file_close(file);
+      return (void*)SYS_ERROR; // Then we can't mmap here so return SYS_ERROR
     }
   }
 
@@ -633,54 +638,58 @@ mmapid_t mmap(int argc, void* argv[]) {
    *  Map File to Virtual Address and Add to
    * --------------------------------------------------------------------*/
 
+  /* Loop through all full pages we need to add to virtual memory */
+  uintptr_t i;
+  for (i = 0; i < cur_file_length; i += PGSIZE) {
+    size_t set_ready_bytes =
+        (i + PGSIZE <= cur_file_length) ? PGSIZE : cur_file_length % PGSIZE;
+
+    /* Here we check for cases where spt_add_mmap fails */
+    if (spt_add_mmap(
+            cur_process->spt, // The current process' spt
+            addr + i,         // The address of the current page added
+            file,             // The original file this data is taken from
+            i,                // The offset is i
+            set_ready_bytes,  // Adding the only non page sized data from file
+            PGSIZE - set_ready_bytes, // Rest of bytes in page are zero_bytes
+            true,                     // mmaps are always writable
+            mmap_id                   // Id of the mmap
+            ) == NULL) {
+
+      /* Start from the first page start point until
+         the one before the last one we added and remove
+         every page we added to spt. */
+      for (uintptr_t j = 0; j < i; j += PGSIZE) {
+        struct supp_page_table_entry* spte =
+            spt_lookup(&cur_process->spt, addr + j);
+
+        if (spte == NULL)
+          continue;
+
+        spt_remove(cur_process->spt, spte);
+      }
+
+      file_close(file);
+      return (void*)SYS_ERROR;
+    }
+  }
+
   /* Pass a new entry to mmap_table */
   struct mmap_entry* new_entry = malloc(sizeof *new_entry);
   new_entry->mmap_id = mmap_id;
   new_entry->vaddr = addr;
-  new_entry->page_count = (cur_file_length % PGSIZE)
-                              ? cur_file_length / PGSIZE + 1
-                              : cur_file_length / PGSIZE;
+  new_entry->page_count = page_count;
   new_entry->file = file;
 
-  hash_insert(&cur_process->mmap_table, new_entry);
+  hash_insert(&cur_process->mmap_table, &new_entry->elem);
 
-  /* Loop through all full pages we need to add to virtual memory */
-  uintptr_t i;
-  for (i = 0; i < cur_file_length; i += PGSIZE) {
-    /* TODO: CHECK FOR NULL CASES */
-    spt_add_mmap(cur_process->spt, // The current process' spt
-                 addr + i,         // The address of the current page added
-                 file,             // The original file this data is taken from
-                 i,                // The offset is i
-                 PGSIZE, // Any page in the for loop will be full of data
-                 0,    // Thus any page in the for loop will not have zero_bytes
-                 true, // mmaps are always writable
-                 mmap_id // Id of the mmap
-    );
-  }
-
-  /* Only do this code if there is still unadded data left */
-  if (i % PGSIZE != 0) {
-    /* Add the only page which has zero_bytes in it
-      This wasn't touched in the for loop.         */
-    spt_add_mmap(cur_process->spt, // The current process' spt
-                 addr + i,         // The address of the current page added
-                 file,             // The original file this data is taken from
-                 i,                // The offset is i
-                 cur_file_length %
-                     PGSIZE, // Adding the only non page sized data from file
-                 PGSIZE - (cur_file_length %
-                           PGSIZE), // Rest of bytes in page are zero_bytes
-                 true,              // mmaps are always writable
-                 mmap_id            // Id of the mmap
-    );
-  }
+  return (void*)mmap_id;
 }
 
 /*
  * Unmaps the mapping designated by mmap_id.
  */
-void munmap(int argc, void* argv[]) {
+static void* munmap(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
 
@@ -690,7 +699,7 @@ void munmap(int argc, void* argv[]) {
 
   struct mmap_entry mock_entry;
   mock_entry.mmap_id = mmap_id;
-  struct hash_elem* e = hash_find(&cur_process->mmap_table, &mock_entry);
+  struct hash_elem* e = hash_find(&cur_process->mmap_table, &mock_entry.elem);
   if (e == NULL)
     return;
 
