@@ -30,6 +30,63 @@ static bool hash_less_frame_table(const struct hash_elem*,
                                   const struct hash_elem*, void*);
 static void frame_destructor(struct hash_elem* e, void* aux);
 
+static struct list frame_list;
+static struct list_elem* clock_hand;
+
+static struct frame* frame_to_evict(void) {
+
+  // Aquire lock before the loop as we are looking at a shared list
+  lock_acquire(&ft.frame_table_lock);
+  struct frame* to_evict = NULL;
+  // Decide what to pick
+  while (to_evict == NULL) {
+
+    if (clock_hand == NULL || clock_hand == list_end(&frame_list)) {
+      clock_hand = list_begin(&frame_list);
+    }
+    // Initally this will be the start, but as we go around the clock it will
+    // increment
+    struct frame* f = list_entry(clock_hand, struct frame, clock_elem);
+
+    // Skip pinned frames
+    if (f->pinned) {
+      clock_hand = list_next(clock_hand);
+      continue;
+    }
+
+    // Check if this is being shared by other processes
+    bool recently_used = false;
+
+    struct list_elem* e;
+
+    for (e = list_begin(&f->process_frame_mappings);
+         e != list_end(&f->process_frame_mappings); e = list_next(e)) {
+      struct process_frame_mapping* pfm =
+          list_entry(e, struct process_frame_mapping, elem);
+
+      if (pagedir_is_accessed(pfm->process->pagedir, pfm->user_vaddr)) {
+        recently_used = true;
+
+        pagedir_set_accessed(pfm->process->pagedir, pfm->user_vaddr, false);
+      }
+
+      if (recently_used) {
+        clock_hand = list_next(clock_hand);
+      } else {
+        to_evict = f;
+
+        clock_hand = list_next(clock_hand);
+      }
+    }
+  }
+
+  // Release shared lock
+  lock_release(&ft.frame_table_lock);
+
+  // Return the process to evict
+  return to_evict;
+}
+
 /* ----------------------------------------------------------------------
  *  Hash helpers
  * --------------------------------------------------------------------*/
@@ -55,6 +112,8 @@ static bool hash_less_frame_table(const struct hash_elem* a,
 void frame_table_init(void) {
   lock_init(&ft.frame_table_lock);
   hash_init(&ft.table, hash_frame_table, hash_less_frame_table, NULL);
+  list_init(&frame_list);
+  clock_hand = NULL;
 }
 
 void frame_table_destroy(void) {
@@ -137,6 +196,11 @@ void frame_free(void* k_addr) {
 
   hash_delete(&ft.table, &f->elem);
 
+  if (clock_hand == &f->clock_elem) {
+    clock_hand = list_next(clock_hand);
+  }
+  list_remove(&f->clock_elem);
+
   struct list pfm_list = f->process_frame_mappings;
   list_init(&f->process_frame_mappings); // clear the list
 
@@ -206,6 +270,7 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   struct hash_elem* old = hash_insert(&ft.table, &f->elem);
   DBG("inserted the frame to frame table");
   ASSERT(old == NULL);
+  list_push_back(&frame_list, &f->clock_elem);
   DBG("old is null!!!! returning k_addr");
   lock_release(&ft.frame_table_lock);
 
