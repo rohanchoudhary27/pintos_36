@@ -1,19 +1,24 @@
 #include "vm/frame.h"
+#include "devices/swap.h"
 #include "lib/kernel/list.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include <debug.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 static unsigned hash_frame_table(const struct hash_elem*, void*);
 static bool hash_less_frame_table(const struct hash_elem*,
                                   const struct hash_elem*, void*);
 static void frame_destructor(struct hash_elem* e, void* aux);
+static void* frame_evict(void);
+static struct frame* frame_to_evict(void);
 
 static struct list frame_list;
 static struct list_elem* clock_hand;
@@ -72,7 +77,7 @@ static struct frame* frame_to_evict(void) {
   return to_evict;
 }
 
-void* frame_evict(void) {
+static void* frame_evict(void) {
 
   lock_acquire(&ft.frame_table_lock);
 
@@ -123,7 +128,7 @@ void* frame_evict(void) {
         list_entry(e, struct process_frame_mapping, elem);
 
     struct supp_page_table_entry* spte =
-        spt_lookup(&pfm->process->spt, pfm->user_vaddr);
+        spt_lookup(pfm->process->spt, pfm->user_vaddr);
 
     if (spte) {
       spte->frame = NULL;
@@ -317,7 +322,7 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   void* k_addr = palloc_get_page(flags | PAL_USER);
 
   if (k_addr == NULL) {
-    // eviction later here
+    frame_evict();
     return NULL;
   }
 
