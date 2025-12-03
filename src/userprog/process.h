@@ -5,6 +5,7 @@
 #include "syscall.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 
 #define PROC_SUCC (0)  /* Exit code for normal process termination. */

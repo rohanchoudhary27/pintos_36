@@ -3,8 +3,9 @@
 
 #include "filesys/file.h"
 #include "lib/stdbool.h"
-#include "threads/interrupt.h"
 #include "process.h"
+#include "threads/interrupt.h"
+#include "vm/mmap.h"
 
 #define BUFFER_WRITE_SIZE (150)
 
@@ -21,15 +22,6 @@ typedef void* (*syscall_f)(int argc, void* argv);
 /* File descriptor to file pairs struct that can be added to lists */
 struct file_desc {
   int fd;
-  struct file* file;
-  struct hash_elem elem;
-};
-
-/* Struct to store in mmap_table in processes */
-struct mmap_entry {
-  uint32_t mmap_id;
-  void* vaddr;
-  uint32_t page_count;
   struct file* file;
   struct hash_elem elem;
 };
