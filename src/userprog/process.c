@@ -508,8 +508,24 @@ void process_exit(int exit_code) {
           pagedir_destroy (pd);
         }
 
-      /* Allow access to the current process's executable file if
-         the process is exit */
+        /* Decrememnt reference to read only files */
+
+        // Logic:
+        // We iterate through every element of SPT - so that we go through every
+        // single page For every single page, we then alter the hash of the
+        // shared_page_ref (which is not being iterated through so it can be
+        // deleted).
+        struct hash_iterator i;
+        hash_first(&i, &cur->spt);
+        while (hash_next(&i)) {
+          struct supp_page_table_entry* p =
+              hash_entry(hash_cur(&i), struct supp_page_table_entry, elem);
+
+          shared_page_ref_dec(p->file, p->file_offset);
+        }
+
+        /* Allow access to the current process's executable file if
+           the process is exit */
         file = cur->executable;
         if (file != NULL) {
           lock_acquire(&global_file_lock);
