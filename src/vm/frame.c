@@ -1,8 +1,10 @@
 #include "vm/frame.h"
+#include "devices/swap.h"
 #include "lib/kernel/list.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/page.h"
 #include <debug.h>
@@ -10,6 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #define DEBUG_FR 1
 
@@ -31,6 +34,8 @@ static unsigned hash_frame_table(const struct hash_elem*, void*);
 static bool hash_less_frame_table(const struct hash_elem*,
                                   const struct hash_elem*, void*);
 static void frame_destructor(struct hash_elem* e, void* aux);
+static void* frame_evict(void);
+static struct frame* frame_to_evict(void);
 
 static struct list frame_list;
 static struct list_elem* clock_hand;
@@ -87,6 +92,104 @@ static struct frame* frame_to_evict(void) {
 
   // Return the process to evict
   return to_evict;
+}
+
+static void* frame_evict(void) {
+
+  lock_acquire(&ft.frame_table_lock);
+
+  // Use clock algorithm to get frame to evict
+  struct frame* evict = frame_to_evict();
+
+  // if we didnt get a page to evict, panic as all pinned
+  if (evict == NULL) {
+    PANIC("Frame table full and all frames are pinned.");
+  }
+
+  // Unmap and check dirty bit
+  // Check dirty by looking at shared owners and if any wrote, it is dirty
+  bool is_dirty = false;
+
+  struct list_elem* e;
+  for (e = list_begin(&evict->process_frame_mappings);
+       e != list_end(&evict->process_frame_mappings); e = list_next(e)) {
+    struct process_frame_mapping* pfm =
+        list_entry(e, struct process_frame_mapping, elem);
+
+    // Check dirty bit and set if true
+    if (pagedir_is_dirty(pfm->process->pagedir, pfm->user_vaddr)) {
+      is_dirty = true;
+    }
+    // Clear page from hardware page table. All further access will trigger page
+    // fault.
+    pagedir_clear_page(pfm->process->pagedir, pfm->user_vaddr);
+  }
+
+  // Save index
+  size_t swap_slot_index = -1;
+
+  if (evict->f_kind == FRAME_ANON) {
+    swap_slot_index = swap_out(evict->k_addr);
+    is_dirty = false;
+  } else if (evict->f_kind == FRAME_EXEC) {
+    if (is_dirty) {
+      swap_slot_index = swap_out(evict->k_addr);
+    }
+  }
+
+  // Update supplementary page table for all owners
+  for (e = list_begin(&evict->process_frame_mappings);
+       e != list_end(&evict->process_frame_mappings);) {
+
+    struct process_frame_mapping* pfm =
+        list_entry(e, struct process_frame_mapping, elem);
+
+    struct supp_page_table_entry* spte =
+        spt_lookup(pfm->process->spt, pfm->user_vaddr);
+
+    if (spte) {
+      spte->frame = NULL;
+
+      if (evict->f_kind == FRAME_MMAP && is_dirty) {
+        if (spte->file) {
+          file_write_at(spte->file, evict->k_addr, spte->read_bytes,
+                        spte->file_offset);
+        }
+      }
+
+      else if (swap_slot_index != (size_t)-1) {
+        spte->in_swap = true;
+        spte->swap_slot = swap_slot_index;
+      }
+    }
+
+    // Remove mapping from the list and
+    struct list_elem* next_e = list_remove(e);
+    free(pfm);
+    e = next_e;
+  }
+
+  // Clean up
+  // Remove from hash_table
+  hash_delete(&ft.table, &evict->elem);
+
+  // Remove from clock list
+  if (clock_hand == &evict->clock_elem) {
+    clock_hand = list_next(clock_hand);
+  }
+  list_remove(&evict->clock_elem);
+
+  // Free physical page
+  palloc_free_page(evict->k_addr);
+
+  // Free frame struct
+  free(evict);
+
+  lock_release(&ft.frame_table_lock);
+
+  void* k_addr = evict->k_addr;
+  memset(k_addr, 0, PGSIZE);
+  return k_addr;
 }
 
 /* ----------------------------------------------------------------------
@@ -236,7 +339,7 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   void* k_addr = palloc_get_page(flags | PAL_USER);
 
   if (k_addr == NULL) {
-    // eviction
+    frame_evict();
     return NULL;
   }
 
