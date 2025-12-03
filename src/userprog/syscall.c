@@ -3,6 +3,8 @@
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
+#include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -52,6 +54,9 @@ static void* sys_write(int argc, void* argv[]);
 static void* sys_seek(int argc, void* argv[]);
 static void* sys_tell(int argc, void* argv[]);
 static void* sys_close(int argc, void* argv[]);
+
+static void* sys_mmap(int argc, void* argv[]);
+static void* sys_munmap(int argc, void* argv[]);
 
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
@@ -109,8 +114,14 @@ static struct syscall_descriptor syscall_map[] = {
     [SYS_TELL] = {.argc = 1,
                   .is_return_void = 0,
                   .sys_func = (syscall_f)sys_tell},
-    [SYS_CLOSE] = {
-        .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_close}};
+    [SYS_CLOSE] = {.argc = 1,
+                   .is_return_void = 1,
+                   .sys_func = (syscall_f)sys_close},
+    [SYS_MMAP] = {.argc = 2,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_mmap},
+    [SYS_MUNMAP] = {
+        .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_munmap}};
 
 // Initializes the system call interface in Pintos.
 void syscall_init(void) {
@@ -565,7 +576,7 @@ static void* sys_close(int argc, void* argv[]) {
  * Puts the segments of data in files in consecutive virtual
  * addresses.
  */
-static void* mmap(int argc, void* argv[]) {
+static void* sys_mmap(int argc, void* argv[]) {
   if (argc != 2)
     return NULL;
 
@@ -608,8 +619,8 @@ static void* mmap(int argc, void* argv[]) {
     return (void*)SYS_ERROR; // If we get null return error.
   }
 
-  int cur_file_length = file_length(file);
-  int page_count = (cur_file_length + PGSIZE - 1) / PGSIZE;
+  size_t cur_file_length = file_length(file);
+  size_t page_count = (cur_file_length + PGSIZE - 1) / PGSIZE;
 
   // If file we are mapping has length 0 fail immediately
   if (cur_file_length == 0) {
@@ -661,7 +672,7 @@ static void* mmap(int argc, void* argv[]) {
          every page we added to spt. */
       for (uintptr_t j = 0; j < i; j += PGSIZE) {
         struct supp_page_table_entry* spte =
-            spt_lookup(&cur_process->spt, addr + j);
+            spt_lookup(cur_process->spt, addr + j);
 
         if (spte == NULL)
           continue;
@@ -689,7 +700,7 @@ static void* mmap(int argc, void* argv[]) {
 /*
  * Unmaps the mapping designated by mmap_id.
  */
-static void* munmap(int argc, void* argv[]) {
+static void* sys_munmap(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
 
@@ -705,10 +716,10 @@ static void* munmap(int argc, void* argv[]) {
 
   struct mmap_entry* mmap_entry = hash_entry(e, struct mmap_entry, elem);
 
-  intptr_t cur_vaddr = mmap_entry->vaddr;
+  intptr_t cur_vaddr = (intptr_t)mmap_entry->vaddr;
   for (uint32_t j = 0; j < mmap_entry->page_count; j++, cur_vaddr += PGSIZE) {
     struct supp_page_table_entry* spte =
-        spt_lookup(&cur_process->spt, cur_vaddr);
+        spt_lookup(cur_process->spt, (void*)cur_vaddr);
 
     if (spte == NULL)
       continue;
@@ -718,19 +729,19 @@ static void* munmap(int argc, void* argv[]) {
       void* kpage = spte->frame->k_addr;
 
       // TODO: Maybe check this part again later.
-      if (pagedir_is_dirty(cur_process->pagedir, cur_vaddr)) {
+      if (pagedir_is_dirty(cur_process->pagedir, (void*)cur_vaddr)) {
         file_write_at(spte->file, kpage, spte->read_bytes, spte->file_offset);
       }
 
-      pagedir_clear_page(cur_process->pagedir, cur_vaddr);
-      frame_free(kpage);
+      pagedir_clear_page(cur_process->pagedir, (void*)cur_vaddr);
+      frame_free_mapping(kpage, cur_process, (void*)cur_vaddr);
     }
 
-    spt_remove(&cur_process->spt, spte);
+    spt_remove(cur_process->spt, spte);
   }
 
   hash_delete(&cur_process->mmap_table, &mmap_entry->elem);
-  file_close(&mmap_entry->file);
+  file_close(mmap_entry->file);
   free(mmap_entry);
 
   return NULL;

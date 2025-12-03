@@ -77,6 +77,7 @@ void spt_clear_frame(struct supp_page_table_entry*);
 void spt_print(struct supplemental_page_table*);
 
 bool lazy_load_page(struct supp_page_table_entry*);
+bool lazy_load_mmap_page(struct supp_page_table_entry*);
 bool grow_stack(void*, struct supplemental_page_table*);
 bool load_and_pin_user_buffer_pages(void*, unsigned);
 void unpin_user_buffer_pages(void*, unsigned);
