@@ -5,6 +5,7 @@
 #include "syscall.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 
 #define PROC_SUCC (0)  /* Exit code for normal process termination. */
@@ -26,6 +27,9 @@ struct process {
   struct lock process_lock;   /* Per process lock. */
   struct semaphore wait_sema; /* Semaphore for the children processes the
                                  process is waiting for. */
+
+  uint32_t next_mmap_id;
+  struct hash mmap_table;
 };
 
 struct child_process {

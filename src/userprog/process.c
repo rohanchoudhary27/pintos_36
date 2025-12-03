@@ -235,6 +235,8 @@ process_init (struct thread *t)
   process->exit_status = PROC_ERR;
   hash_init(&process->fd_table, hash_fd_table, hash_less_fd_table, NULL);
   process->next_fd = FD_BEGIN;
+  hash_init(&process->mmap_table, hash_mmap_table, hash_less_mmap_table, NULL);
+  process->next_mmap_id = 0;
 
   /* Initializing lock of process struct*/
   lock_init(&process->process_lock);
@@ -484,6 +486,11 @@ void process_exit(int exit_code) {
   lock_acquire(&cur->process_lock);
   hash_destroy(&cur->fd_table, destroy_fd_table);
   lock_release(&cur->process_lock);
+
+  /* Destroy all mmap entries and take the appropriate
+     freeing, file closing and writing actions while
+     doing so. Then destroy the table itself */
+  hash_destroy(&cur->mmap_table, destroy_mmap_table);
 
   uint32_t *pd;
   struct file *file;

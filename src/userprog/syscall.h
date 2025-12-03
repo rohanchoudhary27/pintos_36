@@ -3,8 +3,9 @@
 
 #include "filesys/file.h"
 #include "lib/stdbool.h"
-#include "threads/interrupt.h"
 #include "process.h"
+#include "threads/interrupt.h"
+#include "vm/mmap.h"
 
 #define BUFFER_WRITE_SIZE (150)
 

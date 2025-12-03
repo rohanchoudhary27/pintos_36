@@ -11,6 +11,7 @@
 #include "userprog/process.h"
 #include "vm/frame.h"
 #include "vm/page.h"
+#include "vm/mmap.h"
 
 #include <debug.h>
 #include <inttypes.h>
@@ -50,6 +51,9 @@ static void* sys_write(int argc, void* argv[]);
 static void* sys_seek(int argc, void* argv[]);
 static void* sys_tell(int argc, void* argv[]);
 static void* sys_close(int argc, void* argv[]);
+
+static void* sys_mmap(int argc, void* argv[]);
+static void* sys_munmap(int argc, void* argv[]);
 
 static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
@@ -107,8 +111,14 @@ static struct syscall_descriptor syscall_map[] = {
     [SYS_TELL] = {.argc = 1,
                   .is_return_void = 0,
                   .sys_func = (syscall_f)sys_tell},
-    [SYS_CLOSE] = {
-        .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_close}};
+    [SYS_CLOSE] = {.argc = 1,
+                   .is_return_void = 1,
+                   .sys_func = (syscall_f)sys_close},
+    [SYS_MMAP] = {.argc = 2,
+                  .is_return_void = 0,
+                  .sys_func = (syscall_f)sys_mmap},
+    [SYS_MUNMAP] = {
+        .argc = 1, .is_return_void = 1, .sys_func = (syscall_f)sys_munmap}};
 
 // Initializes the system call interface in Pintos.
 void syscall_init(void) {
@@ -167,7 +177,7 @@ static void validate_string(const char* s) {
 }
 
 /*
- * Checks if a user-supplied address is valid and mapped.
+ * Checks if a user-supplied address is valid.
  * Terminates the process if the address is NULL, not in user space,
  * or not mapped in the page directory.
  */
@@ -547,14 +557,43 @@ static void* sys_tell(int argc, void* argv[]) {
 static void* sys_close(int argc, void* argv[]) {
   if (argc != 1)
     return NULL;
-  /* If the fd corresponds to input or output files we return
-     as we can't close them */
 
   int fd = (int)argv[0];
+
+  /* If the fd corresponds to input or output files we return
+    as we can't close them */
   if (fd < FD_BEGIN)
     return NULL;
 
   /* For any other case we close the file directly */
   process_close_file(fd);
+  return NULL;
+}
+
+/*
+ * Puts the segments of data in files in consecutive virtual
+ * addresses.
+ */
+static void* sys_mmap(int argc, void* argv[]) {
+  if (argc != 2)
+    return NULL;
+
+  int fd = (int)argv[0];
+  void* vaddr = (void*)argv[1];
+
+  return (void*)mmap_add_file(fd, vaddr);
+}
+
+/*
+ * Unmaps the mapping designated by mmap_id.
+ */
+static void* sys_munmap(int argc, void* argv[]) {
+  if (argc != 1)
+    return NULL;
+
+  uint32_t mmap_id = (int)argv[0];
+
+  mmap_destroy_entry_by_id(mmap_id);
+
   return NULL;
 }
