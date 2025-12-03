@@ -376,22 +376,6 @@ void shared_page_init(struct read_only_table* read_only_table) {
   lock_init(&read_only_table->lock);
 }
 
-// void* shared_page_lookup(struct file* file, off_t offset) {
-//   ASSERT(file != NULL)
-//   struct read_only_entry key;
-//   key.file = file;
-//   key.offset = offset;
-
-//   struct hash_elem* e =
-//       hash_find(&read_only_page_table.read_only_table, &key.elem);
-
-//   if (e != NULL) {
-//     struct read_only_entry* entry = hash_entry(e, struct read_only_entry, elem);
-//     return entry->page;
-//   }
-//   return NULL;
-// }
-
 void shared_page_ref_inc(struct file* file, off_t offset, void* frame) {
   struct read_only_entry key;
   key.file = file;
