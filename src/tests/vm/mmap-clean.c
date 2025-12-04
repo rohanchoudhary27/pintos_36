@@ -33,7 +33,6 @@ test_main (void)
   msg ("munmap \"sample.txt\"");
   munmap (map);
 
-  printf("seeking\n");
   /* Read file back. */
   msg ("seek \"sample.txt\"");
   seek (handle, 0);
