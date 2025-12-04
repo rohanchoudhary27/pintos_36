@@ -54,6 +54,22 @@ struct supp_page_table_entry {
     struct hash_elem elem;
 };
 
+/* Global read only table */
+struct read_only_table {
+  struct hash read_only_table;
+  struct lock lock;
+};
+
+struct read_only_table read_only_page_table;
+
+struct read_only_entry {
+  struct file* file;
+  off_t offset;
+  void* k_addr; // virtual address of the frame
+  int reference_count;
+  struct hash_elem elem;
+};
+
 void spt_init(struct supplemental_page_table*);
 void spt_destroy(struct supplemental_page_table*);
 struct supp_page_table_entry* spt_lookup(struct supplemental_page_table*,
@@ -81,4 +97,10 @@ bool lazy_load_mmap_page(struct supp_page_table_entry*);
 bool grow_stack(void*, struct supplemental_page_table*);
 bool load_and_pin_user_buffer_pages(void*, unsigned, bool);
 void unpin_user_buffer_pages(void*, unsigned);
+
+void shared_page_init(void);
+void* shared_page_lookup(struct file* file, off_t offset);
+void shared_page_ref_inc(struct file* file, off_t offset);
+void shared_page_ref_dec(struct file* file, off_t offset);
+
 #endif /* vm/page.h */

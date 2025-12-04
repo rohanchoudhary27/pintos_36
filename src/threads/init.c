@@ -34,6 +34,7 @@
 #ifdef VM
 #include "devices/swap.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 #endif
 #ifdef FILESYS
 #include "devices/block.h"
@@ -105,8 +106,8 @@ main (void)
 
   /* Segmentation. */
 #ifdef USERPROG
-  tss_init ();
-  gdt_init ();
+  tss_init();
+  gdt_init();
 #endif
 
   /* Initialize interrupt handlers. */
@@ -118,6 +119,7 @@ main (void)
   exception_init ();
   root_process_init ();
   frame_table_init();
+  shared_page_init();
   syscall_init ();
 #endif
 

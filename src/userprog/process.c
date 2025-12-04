@@ -500,6 +500,25 @@ void process_exit(int exit_code) {
 
     if (cur->spt != NULL) {
       struct supplemental_page_table* spt = cur->spt;
+      /* Decrememnt reference to read only files */
+
+      // Logic:
+      // We iterate through every element of SPT - so that we go through every
+      // single page For every single page, we then alter the hash of the
+      // shared_page_ref (which is not being iterated through so it can be
+      // deleted).
+
+      lock_acquire(&read_only_page_table.lock);
+      struct hash_iterator i;
+      hash_first(&i, &cur->spt->page_map);
+      while (hash_next(&i)) {
+        struct supp_page_table_entry* p =
+            hash_entry(hash_cur(&i), struct supp_page_table_entry, elem);
+
+        shared_page_ref_dec(p->file, p->file_offset);
+      }
+
+      lock_release(&read_only_page_table.lock);
 
       /* release frames and swap slots for all SPTEs. */
       lock_acquire(&spt->lock);
@@ -512,7 +531,6 @@ void process_exit(int exit_code) {
 
       /* Then destroy the SPT itself (frees SPTE structs). */
       cur->spt = NULL;
-      /* If cur->spt was heap-allocated, free(cur->spt) here. */
     }
 
     /* Destroy the current process's page directory and switch back

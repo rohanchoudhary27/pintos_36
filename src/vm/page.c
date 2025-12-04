@@ -48,6 +48,38 @@ static bool spt_less(const struct hash_elem* a, const struct hash_elem* b,
   return spte_a->upage < spte_b->upage;
 }
 
+/* Read_only_table hash functions */
+
+static unsigned hash_read_only_table(const struct hash_elem* e, void*) {
+  struct read_only_entry* read_only_entry =
+      hash_entry(e, struct read_only_entry, elem);
+
+  unsigned hash1 = hash_ptr(read_only_entry->file);
+  unsigned hash2 = hash_int(read_only_entry->offset);
+
+  // Return exclusive or (^) -arbitrary func- as demonstrated in example in
+  // spec
+  return hash1 ^ hash2;
+}
+
+static bool hash_less_read_only_table(const struct hash_elem* a,
+                                      const struct hash_elem* b, void*) {
+  struct read_only_entry* read_only_entry_a =
+      hash_entry(a, struct read_only_entry, elem);
+  struct read_only_entry* read_only_entry_b =
+      hash_entry(b, struct read_only_entry, elem);
+
+  struct file* file_a = read_only_entry_a->file;
+  struct file* file_b = read_only_entry_b->file;
+
+  // Compare both the keys in comparision
+  if (file_a != file_b) {
+    return (file_a < file_b);
+  } else {
+    return (read_only_entry_a->offset < read_only_entry_b->offset);
+  }
+}
+
 /* ----------------------------------------------------------------------
  *  SPT lifecycle
  * --------------------------------------------------------------------*/
@@ -329,6 +361,63 @@ void spt_print(struct supplemental_page_table* spt) {
       "=================================================================\n\n");
 
   lock_release(&spt->lock);
+}
+
+/* ----------------------------------------------------------------------
+ *  Read-Only Page Table Lifecycle (Global)
+ * --------------------------------------------------------------------*/
+
+void shared_page_init(void) {
+  hash_init(&read_only_page_table.read_only_table, hash_read_only_table,
+            hash_less_read_only_table, NULL);
+  lock_init(&read_only_page_table.lock);
+}
+
+void* shared_page_lookup(struct file* file, off_t offset) {
+  ASSERT(file != NULL)
+  struct read_only_entry key;
+  key.file = file;
+  key.offset = offset;
+
+  struct hash_elem* e =
+      hash_find(&read_only_page_table.read_only_table, &key.elem);
+
+  if (e != NULL) {
+    struct read_only_entry* entry = hash_entry(e, struct read_only_entry, elem);
+    return entry->k_addr;
+  }
+  return NULL;
+}
+
+void shared_page_ref_inc(struct file* file, off_t offset) {
+  struct read_only_entry key;
+  key.file = file;
+  key.offset = offset;
+
+  struct hash_elem* e =
+      hash_find(&read_only_page_table.read_only_table, &key.elem);
+  if (e != NULL) {
+    struct read_only_entry *entry = hash_entry(e, struct read_only_entry, elem);
+    entry->reference_count++;
+  }
+}
+
+void shared_page_ref_dec(struct file* file, off_t offset) {
+  struct read_only_entry key;
+  key.file = file;
+  key.offset = offset;
+
+  struct hash_elem* e =
+      hash_find(&read_only_page_table.read_only_table, &key.elem);
+  if (e != NULL) {
+    struct read_only_entry* entry = hash_entry(e, struct read_only_entry, elem);
+    entry->reference_count--;
+
+    if (entry->reference_count == 0) {
+      hash_delete(&read_only_page_table.read_only_table, &entry->elem);
+      free(entry);
+    }
+  }
 }
 
 /* ----------------------------------------------------------------------

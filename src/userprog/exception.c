@@ -1,8 +1,10 @@
 #include "userprog/exception.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/frame.h"
 #include "vm/page.h"
@@ -179,11 +181,36 @@ page_fault (struct intr_frame *f)
 
   if (success) { /* The page is not present */
     if (spte != NULL) {
-      if (spte->kind == SPTE_EXEC && spte->file != NULL)
-        success = lazy_load_page(spte);
-      else if (spte->kind == SPTE_MMAP && spte->file != NULL)
-        success = lazy_load_mmap_page(spte);
-      else if (spte->in_swap)
+      if (spte->kind == SPTE_EXEC && spte->file != NULL) {
+        // Read only file sharing - should happen if page is successefully
+        // loaded
+        lock_acquire(&read_only_page_table.lock);
+        void* existing_k_addr =
+            shared_page_lookup(spte->file, spte->file_offset);
+        if (existing_k_addr != NULL) {
+          success =
+              frame_add_mapping(existing_k_addr, curr->process, fault_addr);
+          if (success) {
+            pagedir_set_page(curr->process->pagedir, fault_addr,
+                             spte->frame->k_addr, false);
+            shared_page_ref_inc(spte->file, spte->file_offset);
+            spte->frame = frame_lookup(existing_k_addr);
+          }
+        } else {
+          success = lazy_load_page(spte);
+          if (success && !spte->writable) {
+            struct read_only_entry* new_entry =
+                malloc(sizeof(struct read_only_entry));
+            new_entry->file = spte->file;
+            new_entry->offset = spte->file_offset;
+            new_entry->k_addr = spte->frame->k_addr;
+            new_entry->reference_count = 1;
+            hash_insert(&read_only_page_table.read_only_table,
+                        &new_entry->elem);
+          }
+        }
+        lock_release(&read_only_page_table.lock);
+      } else if (spte->in_swap)
         // ... implement swapping thing here
         success = true;
       else
