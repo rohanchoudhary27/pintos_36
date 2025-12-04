@@ -213,6 +213,8 @@ page_fault (struct intr_frame *f)
       } else if (spte->in_swap)
         // ... implement swapping thing here
         success = true;
+      else if (spte->kind == SPTE_MMAP)
+        success = lazy_load_mmap_page(spte);
       else
         success = false;
     } else if (VALID_STACK_ACCESS(fault_addr,

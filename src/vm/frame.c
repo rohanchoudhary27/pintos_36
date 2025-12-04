@@ -43,7 +43,7 @@ static struct list_elem* clock_hand;
 static struct frame* frame_to_evict(void) {
 
   // Aquire lock before the loop as we are looking at a shared list
-  lock_acquire(&ft.frame_table_lock);
+  // lock_acquire(&ft.frame_table_lock);
   struct frame* to_evict = NULL;
   // Decide what to pick
   while (to_evict == NULL) {
@@ -88,7 +88,7 @@ static struct frame* frame_to_evict(void) {
   }
 
   // Release shared lock
-  lock_release(&ft.frame_table_lock);
+  // lock_release(&ft.frame_table_lock);
 
   // Return the process to evict
   return to_evict;
