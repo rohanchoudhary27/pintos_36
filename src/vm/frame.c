@@ -169,6 +169,8 @@ static bool frame_evict(void) {
 
   bool drop_without_swap = false;
   bool use_swap = false;
+  bool is_ro_shared =
+      (is_file_backed && !dirty && !first_spte->writable && is_exec);
   size_t slot = BITMAP_ERROR;
 
   if (is_file_backed && !dirty) {
@@ -213,10 +215,11 @@ static bool frame_evict(void) {
       return false;
     }
   } else {
-    DBG("drop without swap should be true in this case: %d", drop_without_swap);
-    ASSERT(drop_without_swap);
     /* we simply drop the frame. Each process will lazy-load the page again from
         the executable when it faults next time. */
+    if (drop_without_swap && is_ro_shared) {
+      shared_page_ref_dec(first_spte->file, first_spte->file_offset);
+    }
   }
 
   for (e = list_begin(&mappings); e != list_end(&mappings); e = list_next(e)) {

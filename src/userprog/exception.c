@@ -181,7 +181,9 @@ page_fault (struct intr_frame *f)
 
   if (success) { /* The page is not present */
     if (spte != NULL) {
-      if (spte->kind == SPTE_EXEC && spte->file != NULL) {
+      if (spte->in_swap) {
+        swap_load_page(spte);
+      } else if (spte->kind == SPTE_EXEC && spte->file != NULL) {
         // Read only file sharing - should happen if page is successefully
         // loaded
         lock_acquire(&read_only_page_table.lock);
@@ -210,10 +212,6 @@ page_fault (struct intr_frame *f)
           }
         }
         lock_release(&read_only_page_table.lock);
-      } else if (spte->in_swap) {
-        DBG("page_fault: bringing page %p back from swap (slot %zu)",
-            spte->upage, spte->swap_slot);
-        swap_load_page(spte);
       } else if (spte->kind == SPTE_MMAP)
         success = lazy_load_mmap_page(spte);
       else

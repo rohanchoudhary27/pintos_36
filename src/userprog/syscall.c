@@ -445,6 +445,7 @@ static void* sys_read(int argc, void* argv[]) {
     for (uint32_t i = 0; i < size; i++) {
       ((char*)buffer)[i] = input_getc();
     }
+    unpin_user_buffer_pages(buffer, size);
     return (void*)size;
   }
 
@@ -486,6 +487,7 @@ static void* sys_write(int argc, void* argv[]) {
   }
 
   if (fd == STDIN_FILENO) {
+    unpin_user_buffer_pages(buffer, size);
     return (void*)NO_WRITE; // Can't write to input file so return 0
   }
 
@@ -496,14 +498,17 @@ static void* sys_write(int argc, void* argv[]) {
       putbuf((char*)buffer + i, BUFFER_WRITE_SIZE);
     }
     putbuf(buffer + i, size - i);
+    unpin_user_buffer_pages(buffer, size);
     return (void*)size;
   }
 
   /* Otherwise write to the file from the position specified
      in it's properties */
   struct file* file = process_get_file(fd);
-  if (file == NULL)
+  if (file == NULL) {
+    unpin_user_buffer_pages(buffer, size);
     return (void*)NO_WRITE; // If no file is found with given fd return 0
+  }
 
   lock_acquire(&global_file_lock);
   int bytes_written = file_write(file, buffer, size);

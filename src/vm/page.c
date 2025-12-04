@@ -54,7 +54,7 @@ static unsigned hash_read_only_table(const struct hash_elem* e, void*) {
   struct read_only_entry* read_only_entry =
       hash_entry(e, struct read_only_entry, elem);
 
-  unsigned hash1 = file_hash(read_only_entry->file);
+  unsigned hash1 = hash_ptr(read_only_entry->file);
   unsigned hash2 = hash_int(read_only_entry->offset);
 
   // Return exclusive or (^) -arbitrary func- as demonstrated in example in
@@ -73,11 +73,29 @@ static bool hash_less_read_only_table(const struct hash_elem* a,
   struct file* file_b = read_only_entry_b->file;
 
   // Compare both the keys in comparision
-  if (file_compare(file_a, file_b)) {
+  if (file_less(file_a, file_b)) {
+    return true;
+  } else if (file_compare(file_a, file_b)) {
     return (read_only_entry_a->offset < read_only_entry_b->offset);
   } else {
-    return file_less(file_a, file_b);
+    return false;
   }
+
+  // if (file_get_inode(file_a) < file_get_inode(file_b)) {
+  //   return true;
+  // } else if (file_get_inode(file_a) == file_get_inode(file_b)) {
+  //   return (read_only_entry_a->offset < read_only_entry_b->offset);
+  // } else {
+  //   return false;
+  // }
+
+  // if (file_a < file_b) {
+  //   return true;
+  // } else if (file_a == file_b) {
+  //   return (read_only_entry_a->offset < read_only_entry_b->offset);
+  // } else {
+  //   return false;
+  // }
 }
 
 /* ----------------------------------------------------------------------
