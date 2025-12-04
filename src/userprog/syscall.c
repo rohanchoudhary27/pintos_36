@@ -439,7 +439,6 @@ static void* sys_read(int argc, void* argv[]) {
   /* Make sure [buffer, buffer+size) is loaded into frames and pinned.*/
   if (!load_and_pin_user_buffer_pages(buffer, size, true)) {
     exit_and_set_process_status(SYS_ERROR);
-    // return (void*)SYS_ERROR;
   }
 
   if (fd == STDIN_FILENO) {
@@ -468,6 +467,8 @@ static void* sys_read(int argc, void* argv[]) {
 /* write: size number of bytes from buffer to fd */
 static void* sys_write(int argc, void* argv[]) {
 
+  DBG("sys write called!");
+
   if (argc != 3)
     return NULL;
 
@@ -475,11 +476,24 @@ static void* sys_write(int argc, void* argv[]) {
   void* buffer = argv[1];
   unsigned size = (unsigned)argv[2];
 
+  DBG("what's the buffer? %p", buffer);
+  DBG("is valid udata buffer?");
   is_valid_udata(buffer, size);
+  DBG("yes!");
 
   if (buffer == NULL) {
     return (void*)NO_WRITE;
   }
+
+  DBG("loading and pinning user buffer pages");
+  DBG("BEFORE!");
+  frame_table_print();
+  /* Make sure [buffer, buffer+size) is loaded into frames and pinned.*/
+  if (!load_and_pin_user_buffer_pages(buffer, size, true)) {
+    exit_and_set_process_status(SYS_ERROR);
+  }
+  DBG("AFTER!");
+  frame_table_print();
 
   if (fd == STDIN_FILENO) {
     return (void*)NO_WRITE; // Can't write to input file so return 0
@@ -504,7 +518,7 @@ static void* sys_write(int argc, void* argv[]) {
   lock_acquire(&global_file_lock);
   int bytes_written = file_write(file, buffer, size);
   lock_release(&global_file_lock);
-
+  unpin_user_buffer_pages(buffer, size);
   return (void*)bytes_written;
 }
 

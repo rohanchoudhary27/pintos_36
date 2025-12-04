@@ -47,9 +47,9 @@ struct supp_page_table_entry {
     size_t read_bytes;     /* How many bytes to read from file */
     size_t zero_bytes;     /* How many trailing bytes to zero */
     bool file_writable;    /* file writable */
-   
-    /* For MMAP, optionally remember which mapping this belongs to. */
-    int mapid;             /* Or struct mmap_region*; depends on your mmap design. */
+
+    /* For MMAP, which mapping this belongs to. */
+    int mapid;
 
     struct hash_elem elem;
 };
@@ -95,6 +95,8 @@ void spt_print(struct supplemental_page_table*);
 bool lazy_load_page(struct supp_page_table_entry*);
 bool lazy_load_mmap_page(struct supp_page_table_entry*);
 bool grow_stack(void*, struct supplemental_page_table*);
+bool swap_load_page(struct supp_page_table_entry*);
+
 bool load_and_pin_user_buffer_pages(void*, unsigned, bool);
 void unpin_user_buffer_pages(void*, unsigned);
 

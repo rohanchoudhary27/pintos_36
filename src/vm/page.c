@@ -555,6 +555,37 @@ bool grow_stack(void* fault_addr, struct supplemental_page_table* spt) {
   return true;
 }
 
+bool swap_load_page(struct supp_page_table_entry* spte) {
+  ASSERT(spte != NULL);
+  ASSERT(spte->in_swap);
+
+  struct process* proc = thread_current()->process;
+  void* upage = spte->upage;
+
+  enum FRAME_KIND fk = (spte->kind == SPTE_ANON ? FRAME_ANON : FRAME_EXEC);
+
+  void* kpage = frame_alloc(PAL_USER, fk, proc, upage);
+  if (kpage == NULL)
+    return false;
+
+  swap_in(kpage, spte->swap_slot);
+  spte->in_swap = false; // no longer in swap
+  spte->swap_slot = 0;
+
+  /* Install into the page table. */
+  if (!install_page(upage, kpage, spte->writable)) {
+    frame_free_mapping(kpage, proc, upage);
+    return false;
+  }
+
+  /* Update SPTE to point to this new frame. */
+  struct frame* f = frame_lookup(kpage);
+  ASSERT(f != NULL);
+  spt_set_frame(spte, f);
+
+  return true;
+}
+
 bool load_and_pin_user_buffer_pages(void* buffer, unsigned size,
                                     bool for_write) {
   if (size == 0)
@@ -579,8 +610,8 @@ bool load_and_pin_user_buffer_pages(void* buffer, unsigned size,
         if (!lazy_load_page(spte))
           return false;
       } else if (spte->kind == SPTE_ANON && spte->in_swap) {
-        // TODO: get from swap
-        return false;
+        if (!swap_load_page(spte))
+          return false;
       }
     }
     ASSERT(spte->frame != NULL); // now we should load it in memory
