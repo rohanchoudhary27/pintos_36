@@ -130,7 +130,7 @@ void syscall_init(void) {
 // 'f' contains the user program's CPU state at the time of the syscall.
 static void syscall_handler(struct intr_frame* f) {
   void* esp_save = f->esp;
-  thread_current()->user_esp = esp_save;
+  thread_current()->process->user_esp = esp_save;
   int syscall_no = get_syscall_number_from_frame(f);
   int num_syscall_funcs = sizeof(syscall_map) / sizeof(syscall_map[0]);
   if (syscall_no < 0 || syscall_no >= num_syscall_funcs) {
@@ -183,23 +183,36 @@ static void validate_string(const char* s) {
  */
 static void is_valid_uaddr(const void* addr) {
 
-  struct thread* current_thread = thread_current();
+  struct thread* cur = thread_current();
+  struct process* proc = cur ? cur->process : NULL;
 
-  if (addr == NULL || !is_user_vaddr(addr) || current_thread == NULL ||
-      current_thread->process == NULL ||
-      current_thread->process->pagedir == NULL) {
-    exit_and_set_process_status(PROC_ERR);
+  // basic checks
+  if (addr == NULL || !is_user_vaddr(addr) || proc == NULL ||
+      proc->pagedir == NULL) {
+    exit_and_set_process_status(SYS_ERROR);
   }
 
-  if (pagedir_get_page(thread_current()->process->pagedir, addr) != NULL)
+  void* upage = pg_round_down((void*)addr);
+
+  // if it's already mapped return early
+  if (pagedir_get_page(proc->pagedir, upage) != NULL)
     return;
 
-  void* upage = pg_round_down(addr);
-  void* user_esp = thread_current()->user_esp;
-
-  if (!VALID_STACK_ACCESS(upage, user_esp)) {
-    exit_and_set_process_status(PROC_ERR);
+  // if we have an SPTE for lazy loading return early
+  struct supplemental_page_table* spt = proc->spt;
+  if (spt != NULL) {
+    struct supp_page_table_entry* spte = spt_lookup(spt, upage);
+    if (spte != NULL) {
+      // there is a supplemental entry and we will lazy-load or swap later
+      return;
+    }
   }
+
+  void* user_esp = cur->process->user_esp;
+  if (VALID_STACK_ACCESS(upage, user_esp))
+    return;
+
+  exit_and_set_process_status(PROC_ERR);
 }
 
 /*

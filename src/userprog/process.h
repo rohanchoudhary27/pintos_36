@@ -30,6 +30,8 @@ struct process {
 
   uint32_t next_mmap_id;
   struct hash mmap_table;
+
+  void* user_esp;
 };
 
 struct child_process {

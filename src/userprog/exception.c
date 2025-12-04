@@ -189,7 +189,7 @@ page_fault (struct intr_frame *f)
       else
         success = false;
     } else if (VALID_STACK_ACCESS(fault_addr,
-                                  (user ? f->esp : curr->user_esp))) {
+                                  (user ? f->esp : curr->process->user_esp))) {
       success = grow_stack(fault_addr, spt);
     } else {
       success = false;
