@@ -515,7 +515,9 @@ void process_exit(int exit_code) {
         struct supp_page_table_entry* p =
             hash_entry(hash_cur(&i), struct supp_page_table_entry, elem);
 
-        shared_page_ref_dec(p->file, p->file_offset);
+        if (p->file != NULL && p->kind == SPTE_EXEC && !p->writable) {
+          shared_page_ref_dec(p->file, p->file_offset);
+        }
       }
 
       lock_release(&read_only_page_table.lock);
