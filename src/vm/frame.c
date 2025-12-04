@@ -380,7 +380,7 @@ bool frame_add_mapping(void* k_addr, struct process* proc, void* uaddr) {
   ASSERT(proc != NULL);
 
   lock_acquire(&ft.frame_table_lock);
-  struct frame* f = frame_lookup(k_addr);
+  struct frame* f = frame_lookup_locked(k_addr);
   if (f == NULL) {
     lock_release(&ft.frame_table_lock);
     return false;
