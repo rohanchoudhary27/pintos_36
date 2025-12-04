@@ -475,6 +475,57 @@ bool lazy_load_page(struct supp_page_table_entry* spte) {
   return true;
 }
 
+bool lazy_load_mmap_page(struct supp_page_table_entry* spte) {
+  struct process* p = thread_current()->process;
+  void* upage = spte->upage;
+
+  void* kpage;
+  if (spte->kind != SPTE_MMAP)
+    return false;
+
+  bool success = true;
+
+  /* Check for file-backed SPTE ASK EGE ABOUT THIS ~BARAY */
+  if (spte->file == NULL ||
+      !(spte->kind == SPTE_EXEC || spte->kind == SPTE_MMAP)) {
+    return false;
+  }
+
+  ASSERT(spte->file != NULL);
+
+  if (spte->zero_bytes == PGSIZE) { /* Do not read the file if it's all zeros */
+    kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_EXEC, p, upage);
+    if (kpage == NULL)
+      return false;
+  } else {
+    kpage = frame_alloc(PAL_USER, FRAME_EXEC, p, upage);
+    if (kpage == NULL)
+      return false;
+
+    file_seek(spte->file, spte->file_offset);
+
+    int bytes_read = file_read(spte->file, kpage, spte->read_bytes);
+
+    if (bytes_read != (int)spte->read_bytes)
+      success = false;
+    memset(kpage + bytes_read, 0, spte->zero_bytes);
+  }
+
+  if (!success) {
+    frame_free_mapping(kpage, p, upage);
+    return false;
+  }
+  if (!install_page(upage, kpage, spte->writable)) {
+    frame_free_mapping(kpage, p, upage);
+    return false;
+  }
+
+  struct frame* f = frame_lookup(kpage);
+  spt_set_frame(spte, f);
+  spte->in_swap = false;
+  return true;
+}
+
 /*
 TODO: the slides say Beware: as with any other page, the stack can be swapped
 out does this mean if it's in a swap slot it should be brought back? idk
@@ -504,7 +555,8 @@ bool grow_stack(void* fault_addr, struct supplemental_page_table* spt) {
   return true;
 }
 
-bool load_and_pin_user_buffer_pages(void* buffer, unsigned size) {
+bool load_and_pin_user_buffer_pages(void* buffer, unsigned size,
+                                    bool for_write) {
   if (size == 0)
     return true;
 
@@ -517,6 +569,9 @@ bool load_and_pin_user_buffer_pages(void* buffer, unsigned size) {
   for (uint8_t* upage = start; upage <= end; upage += PGSIZE) {
     struct supp_page_table_entry* spte = spt_lookup(spt, upage);
     if (spte == NULL)
+      return false;
+
+    if (for_write && !spte->writable)
       return false;
 
     if (spte->frame == NULL) { // not in frame yet, demand load
