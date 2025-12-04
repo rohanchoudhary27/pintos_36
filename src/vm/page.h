@@ -47,9 +47,9 @@ struct supp_page_table_entry {
     size_t read_bytes;     /* How many bytes to read from file */
     size_t zero_bytes;     /* How many trailing bytes to zero */
     bool file_writable;    /* file writable */
-   
-    /* For MMAP, optionally remember which mapping this belongs to. */
-    int mapid;             /* Or struct mmap_region*; depends on your mmap design. */
+
+    /* For MMAP, which mapping this belongs to. */
+    int mapid;
 
     struct hash_elem elem;
 };

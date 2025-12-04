@@ -1,11 +1,12 @@
 /* Verifies that mmap'd regions are only written back on munmap
    if the data was actually modified in memory. */
 
-#include <string.h>
-#include <syscall.h>
-#include "tests/vm/sample.inc"
 #include "tests/lib.h"
 #include "tests/main.h"
+#include "tests/vm/sample.inc"
+#include <stdio.h>
+#include <string.h>
+#include <syscall.h>
 
 void
 test_main (void)
@@ -32,6 +33,7 @@ test_main (void)
   msg ("munmap \"sample.txt\"");
   munmap (map);
 
+  printf("seeking\n");
   /* Read file back. */
   msg ("seek \"sample.txt\"");
   seek (handle, 0);

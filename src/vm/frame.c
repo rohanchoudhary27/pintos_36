@@ -7,6 +7,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/page.h"
+#include <bitmap.h>
 #include <debug.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -34,7 +35,7 @@ static unsigned hash_frame_table(const struct hash_elem*, void*);
 static bool hash_less_frame_table(const struct hash_elem*,
                                   const struct hash_elem*, void*);
 static void frame_destructor(struct hash_elem* e, void* aux);
-static void* frame_evict(void);
+static bool frame_evict(void);
 static struct frame* frame_to_evict(void);
 
 static struct list frame_list;
@@ -94,102 +95,159 @@ static struct frame* frame_to_evict(void) {
   return to_evict;
 }
 
-static void* frame_evict(void) {
+static bool frame_evict(void) {
 
   lock_acquire(&ft.frame_table_lock);
 
-  // Use clock algorithm to get frame to evict
-  struct frame* evict = frame_to_evict();
+  struct frame* evict = frame_to_evict(); // uses the clock algorithm
 
-  // if we didnt get a page to evict, panic as all pinned
   if (evict == NULL) {
-    PANIC("Frame table full and all frames are pinned.");
+    lock_release(&ft.frame_table_lock);
+    return false;
   }
 
-  // Unmap and check dirty bit
-  // Check dirty by looking at shared owners and if any wrote, it is dirty
-  bool is_dirty = false;
-
-  struct list_elem* e;
-  for (e = list_begin(&evict->process_frame_mappings);
-       e != list_end(&evict->process_frame_mappings); e = list_next(e)) {
-    struct process_frame_mapping* pfm =
-        list_entry(e, struct process_frame_mapping, elem);
-
-    // Check dirty bit and set if true
-    if (pagedir_is_dirty(pfm->process->pagedir, pfm->user_vaddr)) {
-      is_dirty = true;
-    }
-    // Clear page from hardware page table. All further access will trigger page
-    // fault.
-    pagedir_clear_page(pfm->process->pagedir, pfm->user_vaddr);
-  }
-
-  // Save index
-  size_t swap_slot_index = -1;
-
-  if (evict->f_kind == FRAME_ANON) {
-    swap_slot_index = swap_out(evict->k_addr);
-    is_dirty = false;
-  } else if (evict->f_kind == FRAME_EXEC) {
-    if (is_dirty) {
-      swap_slot_index = swap_out(evict->k_addr);
-    }
-  }
-
-  // Update supplementary page table for all owners
-  for (e = list_begin(&evict->process_frame_mappings);
-       e != list_end(&evict->process_frame_mappings);) {
-
-    struct process_frame_mapping* pfm =
-        list_entry(e, struct process_frame_mapping, elem);
-
-    struct supp_page_table_entry* spte =
-        spt_lookup(pfm->process->spt, pfm->user_vaddr);
-
-    if (spte) {
-      spte->frame = NULL;
-
-      if (evict->f_kind == FRAME_MMAP && is_dirty) {
-        if (spte->file) {
-          file_write_at(spte->file, evict->k_addr, spte->read_bytes,
-                        spte->file_offset);
-        }
-      }
-
-      else if (swap_slot_index != (size_t)-1) {
-        spte->in_swap = true;
-        spte->swap_slot = swap_slot_index;
-      }
-    }
-
-    // Remove mapping from the list and
-    struct list_elem* next_e = list_remove(e);
-    free(pfm);
-    e = next_e;
-  }
-
-  // Clean up
-  // Remove from hash_table
   hash_delete(&ft.table, &evict->elem);
 
-  // Remove from clock list
-  if (clock_hand == &evict->clock_elem) {
-    clock_hand = list_next(clock_hand);
+  /* detach the frame from the global frame table, and move all
+      (process, upage) mappings into a local list so we can work on
+      them without holding the frame_table_lock */
+  struct list mappings;
+  list_init(&mappings);
+  while (!list_empty(&evict->process_frame_mappings)) {
+    struct list_elem* e = list_pop_front(&evict->process_frame_mappings);
+    list_push_back(&mappings, e);
   }
-  list_remove(&evict->clock_elem);
-
-  // Free physical page
-  palloc_free_page(evict->k_addr);
-
-  // Free frame struct
-  free(evict);
 
   lock_release(&ft.frame_table_lock);
 
-  void* k_addr = evict->k_addr;
-  memset(k_addr, 0, PGSIZE);
-  return k_addr;
+  if (list_empty(&mappings)) {
+    /* a frame wihtout owners should not happen, so free it */
+    palloc_free_page(evict->k_addr);
+    free(evict);
+    return true;
+  }
+
+  struct process_frame_mapping* first_pfm =
+      list_entry(list_front(&mappings), struct process_frame_mapping, elem);
+  struct process* first_proc = first_pfm->process;
+  void* first_upage = first_pfm->user_vaddr;
+
+  /* locked, race-condition free lookup. */
+  struct supp_page_table_entry* first_spte =
+      spt_lookup(first_proc->spt, first_upage);
+  ASSERT(first_spte != NULL);
+
+  /* Cases to consider while evicting
+    (1) EXEC type, clean pages (includes read only, shared pages): Drop
+    (2) EXEC type, dirty pages: Swap out
+    (3) MMAP type, writable, dirty pages: Write to filesys
+    (4) MMAP type, non writeable, dirty pages: Swap out
+    (5) MMAP type, writable or nonwriteable, clean pages: Drop
+    (6) ANON type pages: Swap out */
+  bool is_mmap = (first_spte->kind == SPTE_MMAP);
+  bool is_exec = (first_spte->kind == SPTE_EXEC);
+  bool is_file_backed =
+      (first_spte->file != NULL && first_spte->read_bytes > 0 && is_exec) ||
+      is_mmap;
+  bool can_write_back = (is_mmap && first_spte->file_writable);
+
+  /* check if the page is dirty in any of the owning pairs */
+  bool dirty = false;
+  struct list_elem* e;
+  for (e = list_begin(&mappings); e != list_end(&mappings); e = list_next(e)) {
+    struct process_frame_mapping* pfm =
+        list_entry(e, struct process_frame_mapping, elem);
+    struct process* proc = pfm->process;
+    void* upage = pfm->user_vaddr;
+
+    if (pagedir_is_dirty(proc->pagedir, upage) ||
+        pagedir_is_dirty(proc->pagedir, evict->k_addr)) {
+      dirty = true;
+      break;
+    }
+  }
+
+  bool drop_without_swap = false;
+  bool use_swap = false;
+  size_t slot = BITMAP_ERROR;
+
+  if (is_file_backed && !dirty) {
+    /* Clean, file-backed (exec or data/mmap): contents still match the file, so
+        we can safely drop the frame. Corresponds to cases (1) and (5) above */
+    drop_without_swap = true;
+  } else if (!is_file_backed) {
+    /* Anonymous page (stack/heap): always needs swap. Corresponds to case (6)
+     * above */
+    use_swap = true;
+  } else { /* is_file_backed && dirty */
+    if (can_write_back) {
+      /* Writable MMAP: spec wants modifications to be visible in the file.
+         Simplest: write back now and then drop the frame as clean. Corresponds
+         to case (3) above */
+      lock_acquire(&global_file_lock); // TODO global file lock???????
+      file_seek(first_spte->file, first_spte->file_offset);
+      file_write(first_spte->file, evict->k_addr, first_spte->read_bytes);
+      lock_release(&global_file_lock);
+
+      drop_without_swap = true;
+      dirty = false;
+    } else {
+      /* Dirty exec or non-writable file-backed: treat like anon and
+         store in swap. Corresponds to cases (2), (4) above. */
+      use_swap = true;
+    }
+  }
+
+  if (use_swap) {
+    /* we store it in swap once, and all SPTEs will point to the same slot */
+    slot = swap_out(evict->k_addr);
+    if (slot == BITMAP_ERROR) {
+      /* Reattach the mapping to keep frame table consistent */
+      lock_acquire(&ft.frame_table_lock);
+      while (!list_empty(&mappings)) {
+        struct list_elem* el = list_pop_front(&mappings);
+        list_push_back(&evict->process_frame_mappings, el);
+      }
+      hash_insert(&ft.table, &evict->elem);
+      lock_release(&ft.frame_table_lock);
+      return false;
+    }
+  } else {
+    DBG("drop without swap should be true in this case: %d", drop_without_swap);
+    ASSERT(drop_without_swap);
+    /* we simply drop the frame. Each process will lazy-load the page again from
+        the executable when it faults next time. */
+  }
+
+  for (e = list_begin(&mappings); e != list_end(&mappings); e = list_next(e)) {
+    struct process_frame_mapping* pfm =
+        list_entry(e, struct process_frame_mapping, elem);
+    struct process* proc = pfm->process;
+    void* upage = pfm->user_vaddr;
+
+    struct supp_page_table_entry* spte = spt_lookup(proc->spt, upage);
+    ASSERT(spte != NULL);
+
+    // TODO: race conditions in pagedir_clear_page?
+    pagedir_clear_page(proc->pagedir, upage);
+
+    spte->in_swap = use_swap;
+    spte->swap_slot = (spte->in_swap) ? slot : 0;
+    spt_clear_frame(spte);
+  }
+
+  /* free the per-mapping structs and the frame itself. */
+  while (!list_empty(&mappings)) {
+    struct list_elem* el = list_pop_front(&mappings);
+    struct process_frame_mapping* pfm =
+        list_entry(el, struct process_frame_mapping, elem);
+    free(pfm);
+  }
+
+  palloc_free_page(evict->k_addr);
+  free(evict);
+
+  return true;
 }
 
 /* ----------------------------------------------------------------------
@@ -339,8 +397,13 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   void* k_addr = palloc_get_page(flags | PAL_USER);
 
   if (k_addr == NULL) {
-    frame_evict();
-    return NULL;
+    if (!frame_evict())
+      return NULL;
+    /* try again, if it fails again we couldn't evict something
+        and something's wrong */
+    k_addr = palloc_get_page(flags | PAL_USER);
+    if (k_addr == NULL)
+      return NULL; /* something is seriously wrong */
   }
 
   struct frame* f = malloc(sizeof *f);
