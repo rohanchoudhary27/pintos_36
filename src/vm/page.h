@@ -56,18 +56,20 @@ struct supp_page_table_entry {
 
 /* Global read only table */
 struct read_only_table {
-  struct hash read_only_table;
-  struct lock lock;
+  struct hash read_only_table; // Key (file anf offset), value is virtual
+  // address of physical frame
+  struct lock lock; // Synchronisation lock
 };
 
 struct read_only_table read_only_page_table;
 
 struct read_only_entry {
-  struct file* file;
-  off_t offset;
+  struct file*
+      file;     // Used to identify if a process is requesting the same file
+  off_t offset; // Offset in the file of the page
   void* k_addr; // virtual address of the frame
-  int reference_count;
-  struct hash_elem elem;
+  int reference_count;   // Counter for how many pages are sharing that frame
+  struct hash_elem elem; // Hash table element
 };
 
 void spt_init(struct supplemental_page_table*);
