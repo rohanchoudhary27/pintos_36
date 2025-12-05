@@ -59,7 +59,6 @@ static void syscall_handler(struct intr_frame*);
 static uint32_t get_syscall_number_from_frame(struct intr_frame*);
 static void is_valid_udata(const void*, unsigned);
 static void is_valid_uaddr(const void*);
-static void exit_and_set_process_status(int);
 static void* get_syscall_arg_addr(void*, int);
 
 // Descriptor for a system call in Pintos.
@@ -227,18 +226,6 @@ static void is_valid_udata(const void* data_addr, unsigned size) {
     unsigned move_ptr_by = PGSIZE - ((uintptr_t)(addrptr + i) % PGSIZE);
     i += move_ptr_by < (size - i) ? move_ptr_by : (size - i);
   }
-}
-
-/* Exits the current process with the provided status code. Before exiting, it
-   sets the process exit_status to status. */
-static void exit_and_set_process_status(int status) {
-  struct thread* curr_thread = thread_current();
-  ASSERT(curr_thread->process != NULL);
-
-  lock_acquire(&curr_thread->process->process_lock);
-  curr_thread->process->exit_status = status;
-  lock_release(&curr_thread->process->process_lock);
-  process_exit(status);
 }
 
 /* Retrieves the address of a system call argument from the interrupt frame

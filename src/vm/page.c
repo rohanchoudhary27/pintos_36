@@ -80,22 +80,6 @@ static bool hash_less_read_only_table(const struct hash_elem* a,
   } else {
     return false;
   }
-
-  // if (file_get_inode(file_a) < file_get_inode(file_b)) {
-  //   return true;
-  // } else if (file_get_inode(file_a) == file_get_inode(file_b)) {
-  //   return (read_only_entry_a->offset < read_only_entry_b->offset);
-  // } else {
-  //   return false;
-  // }
-
-  // if (file_a < file_b) {
-  //   return true;
-  // } else if (file_a == file_b) {
-  //   return (read_only_entry_a->offset < read_only_entry_b->offset);
-  // } else {
-  //   return false;
-  // }
 }
 
 /* ----------------------------------------------------------------------
@@ -115,8 +99,23 @@ void spt_init(struct supplemental_page_table* spt) {
 static void spt_free_spte(struct hash_elem* e, void* aux UNUSED) {
   struct supp_page_table_entry* spte =
       hash_entry(e, struct supp_page_table_entry, elem);
+  struct process* proc = thread_current()->process;
 
-  /* Sanity: at this point we expect that no frame still points to this SPTE
+  /* Drop this process's mapping to the frame. */
+  if (spte->frame != NULL) {
+    frame_free_mapping(spte->frame->k_addr, proc, spte->upage);
+    spte->frame = NULL;
+  } else if (spte->in_swap) {
+    // swap_drop(spte->swap_slot);
+    // spte->in_swap = false;
+  }
+
+  // if (spte->file != NULL) {
+  // spte->file = NULL;
+  // file_close(spte->file);
+  // }
+
+  /* at this point we expect that no frame still points to this SPTE
      and any swap slot has been released. */
   ASSERT(spte->frame == NULL ||
          !"frame should have been detached before destroy");

@@ -176,13 +176,18 @@ page_fault (struct intr_frame *f)
 
   bool success = true;
 
+  if (!user) {
+    DBG("KERNEL PAGE FAULT!");
+    DBG("fault addr: %p", fault_addr);
+  }
+
   if (fault_addr == NULL || !is_user_vaddr(fault_addr) || !not_present)
     success = false;
 
   if (success) { /* The page is not present */
     if (spte != NULL) {
       if (spte->in_swap) {
-        swap_load_page(spte);
+        success = swap_load_page(spte);
       } else if (spte->kind == SPTE_EXEC && spte->file != NULL) {
         // Read only file sharing - should happen if page is successefully
         // loaded
@@ -221,7 +226,7 @@ page_fault (struct intr_frame *f)
                                   (user ? f->esp : curr->process->user_esp))) {
       success = grow_stack(fault_addr, spt);
     } else {
-      success = false;
+      exit_and_set_process_status(SYS_ERROR);
     }
   }
 

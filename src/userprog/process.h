@@ -48,10 +48,12 @@ struct child_process {
 };
 
 void root_process_init(void);
-tid_t process_execute(const char* cmd_line);
+tid_t process_execute(const char*);
 int process_wait(tid_t);
 void process_exit(int) NO_RETURN;
 void process_activate(void);
+
+void exit_and_set_process_status(int);
 
 struct file *process_get_file(int fd);
 int process_add_file(struct file *f);

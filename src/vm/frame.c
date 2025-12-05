@@ -41,64 +41,68 @@ static struct frame* frame_to_evict(void);
 static struct list frame_list;
 static struct list_elem* clock_hand;
 
+/* Choose a victim frame using a global second-chance algorithm.
+   Caller MUST hold ft.frame_table_lock. */
 static struct frame* frame_to_evict(void) {
+  ASSERT(lock_held_by_current_thread(&ft.frame_table_lock));
 
-  // Aquire lock before the loop as we are looking at a shared list
-  // lock_acquire(&ft.frame_table_lock);
-  struct frame* to_evict = NULL;
-  // Decide what to pick
-  while (to_evict == NULL) {
+  if (hash_empty(&ft.table))
+    return NULL;
 
-    if (clock_hand == NULL || clock_hand == list_end(&frame_list)) {
-      clock_hand = list_begin(&frame_list);
-    }
-    // Initally this will be the start, but as we go around the clock it will
-    // increment
-    struct frame* f = list_entry(clock_hand, struct frame, clock_elem);
+  /* Two-pass second-chance:
+     - Pass 0: give accessed pages a second chance by clearing A bits.
+     - Pass 1: after that, the first unpinned frame we see will be evicted. */
+  for (int pass = 0; pass < 2; pass++) {
+    struct hash_iterator it;
+    hash_first(&it, &ft.table);
 
-    // Skip pinned frames
-    if (f->pinned) {
-      clock_hand = list_next(clock_hand);
-      continue;
-    }
+    while (hash_next(&it)) {
+      struct frame* f = hash_entry(hash_cur(&it), struct frame, elem);
 
-    // Check if this is being shared by other processes
-    bool recently_used = false;
+      if (f->pinned)
+        continue;
 
-    struct list_elem* e;
+      bool accessed = false;
 
-    for (e = list_begin(&f->process_frame_mappings);
-         e != list_end(&f->process_frame_mappings); e = list_next(e)) {
-      struct process_frame_mapping* pfm =
-          list_entry(e, struct process_frame_mapping, elem);
+      /* A frame can be mapped in multiple processes.
+         If ANY owner has the accessed bit set, we treat it as "recently
+         used". */
+      struct list_elem* e;
+      for (e = list_begin(&f->process_frame_mappings);
+           e != list_end(&f->process_frame_mappings); e = list_next(e)) {
+        struct process_frame_mapping* pfm =
+            list_entry(e, struct process_frame_mapping, elem);
+        struct process* proc = pfm->process;
+        void* upage = pfm->user_vaddr;
 
-      if (pagedir_is_accessed(pfm->process->pagedir, pfm->user_vaddr)) {
-        recently_used = true;
-
-        pagedir_set_accessed(pfm->process->pagedir, pfm->user_vaddr, false);
+        if (pagedir_is_accessed(proc->pagedir, upage)) {
+          accessed = true;
+          if (pass == 0) {
+            /* Second chance: clear accessed bit so that if the
+               page isn’t touched again, it can be evicted on
+               the next pass. */
+            pagedir_set_accessed(proc->pagedir, upage, false);
+          }
+        }
       }
 
-      if (recently_used) {
-        clock_hand = list_next(clock_hand);
-      } else {
-        to_evict = f;
-
-        clock_hand = list_next(clock_hand);
+      /* In pass 0: we only evict if *no* owner had accessed=1
+         (i.e. hasn’t been used lately).
+         In pass 1: all accessed bits have been cleared once, so we
+         evict the first unpinned frame regardless. */
+      if (!accessed || pass == 1) {
+        return f;
       }
     }
   }
 
-  // Release shared lock
-  // lock_release(&ft.frame_table_lock);
-
-  // Return the process to evict
-  return to_evict;
+  /* Should be unreachable unless all frames are pinned. */
+  return NULL;
 }
 
 static bool frame_evict(void) {
 
   lock_acquire(&ft.frame_table_lock);
-
   struct frame* evict = frame_to_evict(); // uses the clock algorithm
 
   if (evict == NULL) {

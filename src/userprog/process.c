@@ -46,7 +46,6 @@ static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static char** parse_cmd_line(const char*, int*);
 static void destroy_fd_table(struct hash_elem*, void*);
-static void spt_release_entry(struct hash_elem*, void*);
 
 /* child proc hash func */
 static unsigned hash_child_process(const struct hash_elem* e,
@@ -522,13 +521,7 @@ void process_exit(int exit_code) {
 
       lock_release(&read_only_page_table.lock);
 
-      /* release frames and swap slots for all SPTEs. */
-      lock_acquire(&spt->lock);
-      spt->page_map.aux = (void*)cur;
-      hash_apply(&spt->page_map, spt_release_entry);
-      lock_release(&spt->lock);
-
-      /* Then destroy the SPT. */
+      /* destroy the SPT. */
       spt_destroy(spt);
 
       /* Then destroy the SPT itself (frees SPTE structs). */
@@ -575,25 +568,16 @@ void process_exit(int exit_code) {
   NOT_REACHED ();
 }
 
-static void spt_release_entry(struct hash_elem* e, void* aux) {
-  struct supp_page_table_entry* spte =
-      hash_entry(e, struct supp_page_table_entry, elem);
-  struct process* proc = (struct process*)aux;
+/* Exits the current process with the provided status code. Before exiting, it
+   sets the process exit_status to status. */
+void exit_and_set_process_status(int status) {
+  struct thread* curr_thread = thread_current();
+  ASSERT(curr_thread->process != NULL);
 
-  /* Drop this process's mapping to the frame. */
-  if (spte->frame != NULL) {
-    frame_free_mapping(spte->frame->k_addr, proc, spte->upage);
-    spte->frame = NULL;
-  }
-
-  /* Release swap slot, if any. */
-  if (spte->in_swap) {
-    // swap_free(spte->swap_slot); /* or your equivalent */
-    // spte->in_swap = false;
-  }
-
-  /* For MMAP pages, you may also want to do extra bookkeeping here
-     (e.g. write-back dirty pages) depending on your mmap design. */
+  lock_acquire(&curr_thread->process->process_lock);
+  curr_thread->process->exit_status = status;
+  lock_release(&curr_thread->process->process_lock);
+  process_exit(status);
 }
 
 /* Sets up the CPU for running user code in the current thread.
