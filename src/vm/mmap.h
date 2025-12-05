@@ -18,11 +18,11 @@ typedef int32_t mmapid_t;
 
 /* Struct to store in mmap_table in processes */
 struct mmap_entry {
-  uint32_t mmap_id;
-  void* vaddr;
-  uint32_t page_count;
-  struct file* file;
-  struct hash_elem elem;
+  uint32_t mmap_id;      // unique identifier
+  void* vaddr;           // virtual address where ther file is mapped
+  uint32_t page_count;   // number of virtual pages for the mapping
+  struct file* file;     // pointer to the open file structure
+  struct hash_elem elem; // hash table element
 };
 
 

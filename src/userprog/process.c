@@ -503,8 +503,8 @@ void process_exit(int exit_code) {
       /* Decrememnt reference to read only files */
 
       // Logic:
-      // We iterate through every element of SPT - so that we go through every
-      // single page For every single page, we then alter the hash of the
+      // We iterate through every element of SPT so that we go through every
+      // single page. For every single page, we then alter the hash of the
       // shared_page_ref (which is not being iterated through so it can be
       // deleted).
 
@@ -785,7 +785,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 /* load() helpers. */
 
-bool install_page(void* upage, void* kpage, bool writable);
+static bool install_page(void* upage, void* kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -919,7 +919,7 @@ static bool setup_stack(void** esp) {
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-bool install_page(void* upage, void* kpage, bool writable) {
+static bool install_page(void* upage, void* kpage, bool writable) {
   struct process *cur = thread_current ()->process;
 
   /* Verify that there's not already a page at that virtual

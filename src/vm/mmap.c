@@ -150,7 +150,6 @@ void mmap_destroy_entry(struct mmap_entry* mmap_entry) {
     if (spte->frame != NULL) {
       void* kpage = spte->frame->k_addr;
 
-      // TODO: Maybe check this part again later.
       if (pagedir_is_dirty(cur_process->pagedir, (void*)cur_vaddr)) {
         file_write_at(spte->file, kpage, spte->read_bytes, spte->file_offset);
       }

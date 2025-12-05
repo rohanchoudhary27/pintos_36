@@ -106,14 +106,9 @@ static void spt_free_spte(struct hash_elem* e, void* aux UNUSED) {
     frame_free_mapping(spte->frame->k_addr, proc, spte->upage);
     spte->frame = NULL;
   } else if (spte->in_swap) {
-    // swap_drop(spte->swap_slot);
-    // spte->in_swap = false;
+    swap_drop(spte->swap_slot);
+    spte->in_swap = false;
   }
-
-  // if (spte->file != NULL) {
-  // spte->file = NULL;
-  // file_close(spte->file);
-  // }
 
   /* at this point we expect that no frame still points to this SPTE
      and any swap slot has been released. */
@@ -481,7 +476,7 @@ bool lazy_load_page(struct supp_page_table_entry* spte) {
     frame_free_mapping(kpage, p, upage);
     return false;
   }
-  if (!install_page(upage, kpage, spte->writable)) {
+  if (!pagedir_set_page(p->pagedir, upage, kpage, spte->writable)) {
     frame_free_mapping(kpage, p, upage);
     return false;
   }
@@ -492,10 +487,6 @@ bool lazy_load_page(struct supp_page_table_entry* spte) {
   return true;
 }
 
-/*
-TODO: the slides say Beware: as with any other page, the stack can be swapped
-out does this mean if it's in a swap slot it should be brought back? idk
-*/
 bool grow_stack(void* fault_addr, struct supplemental_page_table* spt) {
   struct process* p = thread_current()->process;
   void* upage = pg_round_down(fault_addr);
@@ -513,7 +504,7 @@ bool grow_stack(void* fault_addr, struct supplemental_page_table* spt) {
   struct frame* f = frame_lookup(kpage);
   spt_set_frame(new_spte, f);
 
-  if (!install_page(upage, kpage, new_spte->writable)) {
+  if (!pagedir_set_page(p->pagedir, upage, kpage, new_spte->writable)) {
     spt_remove(spt, new_spte);
     frame_free_mapping(kpage, p, upage);
     return false;
@@ -539,7 +530,7 @@ bool swap_load_page(struct supp_page_table_entry* spte) {
   spte->swap_slot = 0;
 
   /* Install into the page table. */
-  if (!install_page(upage, kpage, spte->writable)) {
+  if (!pagedir_set_page(proc->pagedir, upage, kpage, spte->writable)) {
     frame_free_mapping(kpage, proc, upage);
     return false;
   }

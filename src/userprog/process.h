@@ -60,5 +60,4 @@ int process_add_file(struct file *f);
 void process_close_file(int fd);
 void process_close_all_files(void);
 
-bool install_page(void* upage, void* kpage, bool writable);
 #endif /* userprog/process.h */

@@ -38,9 +38,6 @@ static void frame_destructor(struct hash_elem* e, void* aux);
 static bool frame_evict(void);
 static struct frame* frame_to_evict(void);
 
-static struct list frame_list;
-static struct list_elem* clock_hand;
-
 /* Choose a victim frame using a global second-chance algorithm.
    Caller MUST hold ft.frame_table_lock. */
 static struct frame* frame_to_evict(void) {
@@ -103,7 +100,7 @@ static struct frame* frame_to_evict(void) {
 static bool frame_evict(void) {
 
   lock_acquire(&ft.frame_table_lock);
-  struct frame* evict = frame_to_evict(); // uses the clock algorithm
+  struct frame* evict = frame_to_evict(); // uses the 2nd chance algorithm
 
   if (evict == NULL) {
     lock_release(&ft.frame_table_lock);
@@ -190,10 +187,8 @@ static bool frame_evict(void) {
       /* Writable MMAP: spec wants modifications to be visible in the file.
          Simplest: write back now and then drop the frame as clean. Corresponds
          to case (3) above */
-      lock_acquire(&global_file_lock); // TODO global file lock???????
       file_seek(first_spte->file, first_spte->file_offset);
       file_write(first_spte->file, evict->k_addr, first_spte->read_bytes);
-      lock_release(&global_file_lock);
 
       drop_without_swap = true;
       dirty = false;
@@ -235,7 +230,6 @@ static bool frame_evict(void) {
     struct supp_page_table_entry* spte = spt_lookup(proc->spt, upage);
     ASSERT(spte != NULL);
 
-    // TODO: race conditions in pagedir_clear_page?
     pagedir_clear_page(proc->pagedir, upage);
 
     spte->in_swap = use_swap;
@@ -282,8 +276,6 @@ static bool hash_less_frame_table(const struct hash_elem* a,
 void frame_table_init(void) {
   lock_init(&ft.frame_table_lock);
   hash_init(&ft.table, hash_frame_table, hash_less_frame_table, NULL);
-  list_init(&frame_list);
-  clock_hand = NULL;
 }
 
 void frame_table_destroy(void) {
@@ -366,11 +358,6 @@ void frame_free(void* k_addr) {
 
   hash_delete(&ft.table, &f->elem);
 
-  if (clock_hand == &f->clock_elem) {
-    clock_hand = list_next(clock_hand);
-  }
-  list_remove(&f->clock_elem);
-
   struct list pfm_list = f->process_frame_mappings;
   list_init(&f->process_frame_mappings); // clear the list
 
@@ -406,11 +393,9 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   if (k_addr == NULL) {
     if (!frame_evict())
       return NULL;
-    /* try again, if it fails again we couldn't evict something
-        and something's wrong */
     k_addr = palloc_get_page(flags | PAL_USER);
     if (k_addr == NULL)
-      return NULL; /* something is seriously wrong */
+      return NULL; 
   }
 
   struct frame* f = malloc(sizeof *f);
@@ -437,7 +422,6 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   list_push_back(&f->process_frame_mappings, &pfm->elem);
   struct hash_elem* old = hash_insert(&ft.table, &f->elem);
   ASSERT(old == NULL);
-  list_push_back(&frame_list, &f->clock_elem);
   lock_release(&ft.frame_table_lock);
 
   return k_addr;
