@@ -446,7 +446,7 @@ bool lazy_load_page(struct supp_page_table_entry* spte) {
   void* upage = spte->upage;
 
   void* kpage;
-  if (spte->kind != SPTE_EXEC)
+  if (spte->kind != SPTE_EXEC && spte->kind != SPTE_MMAP)
     return false;
 
   bool success = true;
@@ -460,62 +460,11 @@ bool lazy_load_page(struct supp_page_table_entry* spte) {
   ASSERT(spte->file != NULL);
 
   if (spte->zero_bytes == PGSIZE) { /* Do not read the file if it's all zeros */
-    kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_EXEC, p, upage);
+    kpage = frame_alloc(PAL_USER | PAL_ZERO, spte->kind, p, upage);
     if (kpage == NULL)
       return false;
   } else {
-    kpage = frame_alloc(PAL_USER, FRAME_EXEC, p, upage);
-    if (kpage == NULL)
-      return false;
-
-    file_seek(spte->file, spte->file_offset);
-
-    int bytes_read = file_read(spte->file, kpage, spte->read_bytes);
-
-    if (bytes_read != (int)spte->read_bytes)
-      success = false;
-    memset(kpage + bytes_read, 0, spte->zero_bytes);
-  }
-
-  if (!success) {
-    frame_free_mapping(kpage, p, upage);
-    return false;
-  }
-  if (!install_page(upage, kpage, spte->writable)) {
-    frame_free_mapping(kpage, p, upage);
-    return false;
-  }
-
-  struct frame* f = frame_lookup(kpage);
-  spt_set_frame(spte, f);
-  spte->in_swap = false;
-  return true;
-}
-
-bool lazy_load_mmap_page(struct supp_page_table_entry* spte) {
-  struct process* p = thread_current()->process;
-  void* upage = spte->upage;
-
-  void* kpage;
-  if (spte->kind != SPTE_MMAP)
-    return false;
-
-  bool success = true;
-
-  /* Check for file-backed SPTE ASK EGE ABOUT THIS ~BARAY */
-  if (spte->file == NULL ||
-      !(spte->kind == SPTE_EXEC || spte->kind == SPTE_MMAP)) {
-    return false;
-  }
-
-  ASSERT(spte->file != NULL);
-
-  if (spte->zero_bytes == PGSIZE) { /* Do not read the file if it's all zeros */
-    kpage = frame_alloc(PAL_USER | PAL_ZERO, FRAME_EXEC, p, upage);
-    if (kpage == NULL)
-      return false;
-  } else {
-    kpage = frame_alloc(PAL_USER, FRAME_EXEC, p, upage);
+    kpage = frame_alloc(PAL_USER, spte->kind, p, upage);
     if (kpage == NULL)
       return false;
 
