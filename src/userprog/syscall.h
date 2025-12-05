@@ -26,8 +26,6 @@ struct file_desc {
   struct hash_elem elem;
 };
 
-struct lock global_file_lock;
-
 void syscall_init(void);
 
 #endif /* userprog/syscall.h */

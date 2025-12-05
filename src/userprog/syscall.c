@@ -106,7 +106,6 @@ static struct syscall_descriptor syscall_map[] = {
 
 // Initializes the system call interface in Pintos.
 void syscall_init(void) {
-  lock_init(&global_file_lock);
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -309,9 +308,7 @@ static void* sys_create(int argc, void* argv[]) {
   // Validate that the file name string is safe
   validate_string(file_name);
   // Acquire global file system lock to prevent race conditions
-  lock_acquire(&global_file_lock);
   bool succ = filesys_create(file_name, initial_size);
-  lock_release(&global_file_lock);
   return (void*)succ;
 }
 
@@ -326,9 +323,7 @@ static void* sys_remove(int argc, void* argv[]) {
   // Validate that the file name string is safe
   validate_string(file_name);
   // Acquire global file system lock to prevent race conditions
-  lock_acquire(&global_file_lock);
   bool succ = filesys_remove(file_name);
-  lock_release(&global_file_lock);
 
   return (void*)succ;
 }
@@ -344,9 +339,7 @@ static void* sys_open(int argc, void* argv[]) {
   validate_string(file_name);
 
   /* Open file in file system. */
-  lock_acquire(&global_file_lock);
   struct file* file = filesys_open(file_name);
-  lock_release(&global_file_lock);
 
   /* Check if file could not be opened. */
   if (file == NULL)
@@ -381,9 +374,7 @@ static void* sys_filesize(int argc, void* argv[]) {
     return (void*)SYS_ERROR;
   }
   // Acquire global file system lock to prevent race conditions
-  lock_acquire(&global_file_lock);
   int length = file_length(file);
-  lock_release(&global_file_lock);
   return (void*)length;
 }
 
@@ -430,9 +421,7 @@ static void* sys_read(int argc, void* argv[]) {
     return (void*)SYS_ERROR; // If no file is found with given fd return -1
   }
 
-  lock_acquire(&global_file_lock);
   int bytes_read = file_read(file, buffer, size);
-  lock_release(&global_file_lock);
   unpin_user_buffer_pages(buffer, size);
   return (void*)bytes_read;
 }
@@ -482,9 +471,7 @@ static void* sys_write(int argc, void* argv[]) {
     return (void*)NO_WRITE; // If no file is found with given fd return 0
   }
 
-  lock_acquire(&global_file_lock);
   int bytes_written = file_write(file, buffer, size);
-  lock_release(&global_file_lock);
   unpin_user_buffer_pages(buffer, size);
   return (void*)bytes_written;
 }
@@ -508,9 +495,7 @@ static void* sys_seek(int argc, void* argv[]) {
     return NULL;
   }
 
-  lock_acquire(&global_file_lock);
   file_seek(file, pos);
-  lock_release(&global_file_lock);
   return NULL;
 }
 
@@ -537,9 +522,7 @@ static void* sys_tell(int argc, void* argv[]) {
     return (void*)(unsigned)SYS_TELL_NOT_FOUND;
   }
 
-  lock_acquire(&global_file_lock);
   unsigned offset = file_tell(file);
-  lock_release(&global_file_lock);
 
   return (void*)(unsigned)offset;
 }

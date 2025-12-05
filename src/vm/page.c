@@ -438,13 +438,14 @@ bool lazy_load_page(struct supp_page_table_entry* spte) {
   }
 
   ASSERT(spte->file != NULL);
+  enum FRAME_KIND fkind = (spte->kind == SPTE_EXEC) ? FRAME_EXEC : FRAME_MMAP;
 
   if (spte->zero_bytes == PGSIZE) { /* Do not read the file if it's all zeros */
-    kpage = frame_alloc(PAL_USER | PAL_ZERO, spte->kind, p, upage);
+    kpage = frame_alloc(PAL_USER | PAL_ZERO, fkind, p, upage);
     if (kpage == NULL)
       return false;
   } else {
-    kpage = frame_alloc(PAL_USER, spte->kind, p, upage);
+    kpage = frame_alloc(PAL_USER, fkind, p, upage);
     if (kpage == NULL)
       return false;
 

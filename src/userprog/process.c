@@ -427,9 +427,7 @@ static void destroy_children(struct hash_elem* e, void* aux UNUSED) {
 /* Helper func to destroy fd_table */
 static void destroy_fd_table(struct hash_elem* element, void* aux UNUSED) {
   struct file_desc* fd = hash_entry(element, struct file_desc, elem);
-  lock_acquire(&global_file_lock);
   file_close(fd->file);
-  lock_release(&global_file_lock);
   free(fd);
 }
 
@@ -531,12 +529,10 @@ void process_exit(int exit_code) {
        the process is exit */
     file = cur->executable;
     if (file != NULL) {
-      lock_acquire(&global_file_lock);
       /* Don't have to file allow write as file close does that
          but left it to be explicit about intent */
       file_allow_write(file);
       file_close(file);
-      lock_release(&global_file_lock);
       cur->executable = NULL;
     }
 
@@ -965,9 +961,7 @@ process_close_file(int fd)
 
   struct file_desc* f = hash_entry(e, struct file_desc, elem);
   hash_delete(&cur->fd_table, &f->elem);
-  lock_acquire(&global_file_lock);
   file_close(f->file);
-  lock_release(&global_file_lock);
   free(f);
 }
 
@@ -988,9 +982,7 @@ process_close_all_files(void)
     hash_next(&it);
     hash_delete(&cur->fd_table, &f->elem);
 
-    lock_acquire(&global_file_lock);
     file_close(f->file);
-    lock_release(&global_file_lock);
 
     free(f);
   }
