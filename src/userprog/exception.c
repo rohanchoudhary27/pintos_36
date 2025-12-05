@@ -191,12 +191,13 @@ page_fault (struct intr_frame *f)
             shared_page_lookup(spte->file, spte->file_offset);
         if (existing_k_addr != NULL) {
           success =
-              frame_add_mapping(existing_k_addr, curr->process, fault_addr);
+              frame_add_mapping(existing_k_addr, curr->process, spte->upage);
           if (success) {
-            pagedir_set_page(curr->process->pagedir, fault_addr,
-                             spte->frame->k_addr, false);
+            struct frame* frame = frame_lookup(existing_k_addr);
+            pagedir_set_page(curr->process->pagedir, spte->upage, frame->k_addr,
+                             false);
             shared_page_ref_inc(spte->file, spte->file_offset);
-            spte->frame = frame_lookup(existing_k_addr);
+            spt_set_frame(spte, frame);
           }
         } else {
           success = lazy_load_page(spte);
