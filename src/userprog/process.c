@@ -461,6 +461,7 @@ void process_exit(int exit_code) {
   /* telling parent child has exited and frees child_process if parent also
    dead*/
   if (t->child_info != NULL) {
+    printf("%s: exit(%d)\n", thread_current()->name, exit_code);
     lock_acquire(&t->child_info->exit_lock);
 
     t->child_info->exit_status = exit_code;
@@ -558,7 +559,6 @@ void process_exit(int exit_code) {
     }
 
     /* Finally, destroy the current process's struct */
-    printf("%s: exit(%d)\n", thread_current()->name, exit_code);
     thread_current()->process = NULL;
     free(cur);
   }
