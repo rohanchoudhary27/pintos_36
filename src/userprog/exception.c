@@ -218,8 +218,8 @@ page_fault (struct intr_frame *f)
           }
         }
         lock_release(&read_only_page_table.lock);
-      } else if (spte->kind == SPTE_MMAP)
-        success = lazy_load_mmap_page(spte);
+      } else if (spte->kind == SPTE_MMAP && spte->file != NULL)
+        success = lazy_load_page(spte);
       else
         success = false;
     } else if (VALID_STACK_ACCESS(fault_addr,
