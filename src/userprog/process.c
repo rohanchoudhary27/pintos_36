@@ -21,24 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DEBUG_PC 1
-
-#ifdef DEBUG_PC
-
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-    enum intr_level old = intr_disable();                                      \
-    struct thread* t = thread_current();                                       \
-    printf("[T=%s (%d) | %s:%d | %s] " fmt "\n", t ? t->name : "NO-THREAD",    \
-           t ? t->tid : -1, __FILE__, __LINE__, __func__, ##__VA_ARGS__);      \
-    intr_set_level(old);                                                       \
-  } while (0)
-#else
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-  } while (0)
-#endif
-
 #define BYTE_SIZE 4
 
 static bool process_init (struct thread *t);

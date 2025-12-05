@@ -12,21 +12,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define DEBUG_PC 1
-
-#ifdef DEBUG_PC
-
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
-           ##__VA_ARGS__);                                                     \
-  } while (0)
-#else
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-  } while (0)
-#endif
-
 /* ----------------------------------------------------------------------
  *  Hash helpers
  * --------------------------------------------------------------------*/

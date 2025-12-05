@@ -19,21 +19,6 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 
-#define DEBUG_PC 1
-
-#ifdef DEBUG_PC
-
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
-           ##__VA_ARGS__);                                                     \
-  } while (0)
-#else
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-  } while (0)
-#endif
-
 // Define the number of bits used to represent a system call number.
 // In Pintos, system call numbers are stored as 32-bit integers.
 #define SYSCALL_NUMBER_BITS 32

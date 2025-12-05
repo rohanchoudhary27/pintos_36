@@ -13,21 +13,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define DEBUG_PC 1
-
-#ifdef DEBUG_PC
-
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
-           ##__VA_ARGS__);                                                     \
-  } while (0)
-#else
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-  } while (0)
-#endif
-
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -175,11 +160,6 @@ page_fault (struct intr_frame *f)
   struct supp_page_table_entry* spte = spt_lookup(spt, fault_addr);
 
   bool success = true;
-
-  if (!user) {
-    DBG("KERNEL PAGE FAULT!");
-    DBG("fault addr: %p", fault_addr);
-  }
 
   if (fault_addr == NULL || !is_user_vaddr(fault_addr) || !not_present)
     success = false;

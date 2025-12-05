@@ -15,21 +15,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define DEBUG_FR 1
-
-#ifdef DEBUG_FR
-
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-    printf("[%s:%d | %s] " fmt "\n", __FILE__, __LINE__, __func__,             \
-           ##__VA_ARGS__);                                                     \
-  } while (0)
-#else
-#define DBG(fmt, ...)                                                          \
-  do {                                                                         \
-  } while (0)
-#endif
-
 static struct frame* frame_to_evict(void);
 static unsigned hash_frame_table(const struct hash_elem*, void*);
 static bool hash_less_frame_table(const struct hash_elem*,
@@ -361,8 +346,6 @@ void frame_free(void* k_addr) {
   struct list pfm_list = f->process_frame_mappings;
   list_init(&f->process_frame_mappings); // clear the list
 
-  lock_release(&ft.frame_table_lock);
-
   /* Free all process_frame_mapping structures. */
   while (!list_empty(&pfm_list)) {
     struct list_elem* e = list_pop_front(&pfm_list);
@@ -373,6 +356,7 @@ void frame_free(void* k_addr) {
 
   palloc_free_page(f->k_addr);
   free(f);
+  lock_release(&ft.frame_table_lock);
 }
 
 /* ----------------------------------------------------------------------
@@ -388,19 +372,25 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   ASSERT(proc != NULL);
   ASSERT(flags & PAL_USER); // only manage user frames
 
+  lock_acquire(&ft.frame_table_lock);
   void* k_addr = palloc_get_page(flags | PAL_USER);
+  lock_release(&ft.frame_table_lock);
 
   if (k_addr == NULL) {
     if (!frame_evict())
       return NULL;
+    lock_acquire(&ft.frame_table_lock);
     k_addr = palloc_get_page(flags | PAL_USER);
+    lock_release(&ft.frame_table_lock);
     if (k_addr == NULL)
       return NULL; 
   }
 
+  lock_acquire(&ft.frame_table_lock);
   struct frame* f = malloc(sizeof *f);
   if (f == NULL) {
     palloc_free_page(k_addr);
+    lock_release(&ft.frame_table_lock);
     return NULL;
   }
 
@@ -412,8 +402,10 @@ void* frame_alloc(enum palloc_flags flags, enum FRAME_KIND kind,
   if (pfm == NULL) {
     free(f);
     palloc_free_page(k_addr);
+    lock_release(&ft.frame_table_lock);
     return NULL;
   }
+  lock_release(&ft.frame_table_lock);
 
   pfm->process = proc;
   pfm->user_vaddr = pg_round_down(upage);
